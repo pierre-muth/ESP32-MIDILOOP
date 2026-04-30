@@ -56,14 +56,16 @@ struct LooperCallbacks : MIDI_Callbacks {
 
 // ── Arduino entry points ──────────────────────────────────────────────────────
 void setup() {
-
+  delay(500);
+  midi.setCallbacks(looperCB);
+  midi.begin();
+  delay(500);
+  
   uint32_t ts = (millis() - loopStart) % LOOP_MS;
   addEvent({ts, 0x3C, 0x7F, Channel_1, true, true});
   ts = (ts + 50) % LOOP_MS;
   addEvent({ts, 0x3C, 0x00, Channel_1, false, true});
 
-  midi.setCallbacks(looperCB);
-  midi.begin();
   loopStart = millis();
   //setup built-in LED pin as output
     pinMode(LED_BUILTIN, OUTPUT);
