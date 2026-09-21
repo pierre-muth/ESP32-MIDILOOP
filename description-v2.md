@@ -36,7 +36,6 @@ The buttons are stacked vertically on left side of the screen, leaving the cente
 The center part UI and behavior is defined for each mode later.
 
 ### The 4 Modes corresponding to different UI pages:
-
 - Looper
 - Note edit
 - CC edit
@@ -46,7 +45,7 @@ The center part UI and behavior is defined for each mode later.
 
 #### Left buttons below the mode one:
 - Label: Run / Stop status
-- Option: Play / Record (or armed)
+- Option: Play / Record (or armed)	
 - Option: Quantization On / Off
 - Value: BPM speed
 - Label: loop length in bars
@@ -66,20 +65,28 @@ The loop length is just displayed (read only). This can be edited on the Setting
 
 #### Center chart UI:
 The center part takes roughly 75% of the screen width. Its width represents the full loop regardless of the length, and there is a vertical line, animated when the loop is playing, symbolizing the play head. Play direction is left to right.  
-Notes are represented by filled horizontal rectangles. Timing of note on is the horizontal start of the rectangle and the end if note off. The rectangle height is 4 pixel, and is placed vertically according to the note value. With 4 pixel height the vertical span should be 5 octaves or 60 note values.  
+
+Notes are represented by filled horizontal rectangles. Timing of note on is the horizontal start of the rectangle and the end is note off. The rectangle height is 4 pixel, and is placed vertically according to the note value. With 4 pixel height the vertical span should be 5 octaves or 60 note values over the 240 screen pixel height.  
+
 If quantization option is on:  
 Light dashed vertical line represents the bars (pixel pattern 1, 0, 0). The rectangles of the notes are not filled outside of the actual trigger bars if the quantized time value is shortened (later for note on and earlier for note off), and if extended (earlier for note on and later for note off) represented by a 2 pixel line up to the bar.  
+
 On the furthermost right, small (4 pixel) triangles point the incoming midi notes, they appear with note on and disappear with note off. 
 
-### Note edition
+### Note edition mode
 (todo)
 for a new note, the received midi note can be used to position the note value.
 
+### CC edition mode
+(todo)
+
+### Setting mode
+
+(todo)
 
 ### software guideline
 (todo) 
 different tasks, midi task running on one core high priority for timing precision, UI is lower priority, can run at 20 fps. 
-
 
 
 
