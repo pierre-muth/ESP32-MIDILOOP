@@ -16,7 +16,7 @@ We can also record 4 MIDI CC channels in the loop. The CC values are input with 
 - It has a debug UART: TX on D6, RX on D5 (only TX wire needed)
 - It has a built in LED connected to LED_BUILTIN
 
-- It has a monochrom LCD display, the library is adafruit/Adafruit SHARP Memory Display. SPI connections are the following :
+- It has a pure monochrom LCD display, the library is adafruit/Adafruit SHARP Memory Display. SPI connections are the following :
 
   - SHARP_SCK:D8
   - SHARP_MOSI:D10
@@ -51,22 +51,25 @@ The center part UI and behavior is defined for each mode later.
 - Value: BPM speed
 - Label: loop length in bars
 
-#### Center chart UI:
-
-
 #### Logic:
 The Run / Stop status is toggled by the physical button on D4. Run mode is playing the loop and send accordingly the notes on/off on the usb midi output. Stopping the loop puts the cursor/play head back at the beginning of the loop and put back the mode to Play.  
 
 Toggling the from Play to record has two different effect depending on the Run / Stop Status.  
-- If the loop is running, toggling to Record put the system into recording the midi notes received, overdubbing the loop. Notes are not erased by the play head, but if the input note is the same and covers an already recorded note, it prolongs it, basically editing its start (note on) or/and its stop (note off).
-- If the loop is not running (Stop), toggling to Record put the system in Armed mode. In this mode (armed), toggling the mode again will go back to Play and stays in Stop status. However, in the Armed state, the first incoming midi note on will start the loop to Run status and Record mode.
+- If the loop is running, toggling to Record put the system into recording the midi notes received, overdubbing the loop. Notes are not erased by the play head, but if the input note is the same and covers an already recorded note, it prolongs it, basically editing its start (note on) or/and its stop (note off). Pressing again toggles the mode back to Play.
+- If the loop is not running (Stop), toggling to Record put the system in Armed mode. In this mode (armed), toggling the mode again will go back to Play and stays in Stop status. However, in the Armed state, the first incoming midi note on will start the loop to Run status and switch mode to Record. Pressing again from Record toggles the mode back to Play.
 
-Quantization option, when turned on, makes the timings of the note on / off sent to the midi output to stick on the closest bars when the loop is playing.
+Quantization option, when turned on, makes the timings of the note on / off sent to the midi output to stick on the closest bars when the loop is playing. This option also affects the UI by representing the notes and the bars differently, as described later. 
 
 The BPM speed will affect the duration of a bar, adjusting this value changes in real time the playback speed of the loop.
 
 The loop length is just displayed (read only). This can be edited on the Settings page.
 
+#### Center chart UI:
+The center part takes roughly 75% of the screen width. Its width represents the full loop regardless of the length, and there is a vertical line, animated when the loop is playing, symbolizing the play head. Play direction is left to right.  
+Notes are represented by filled horizontal rectangles. Timing of note on is the horizontal start of the rectangle and the end if note off. The rectangle height is 4 pixel, and is placed vertically according to the note value. With 4 pixel height the vertical span should be 5 octaves or 60 note values.  
+If quantization option is on:  
+Light dashed vertical line represents the bars (pixel pattern 1, 0, 0). The rectangles of the notes are not filled outside of the actual trigger bars if the quantized time value is shortened (later for note on and earlier for note off), and if extended (earlier for note on and later for note off) represented by a 2 pixel line up to the bar.  
+On the furthermost right, small (4 pixel) triangles point the incoming midi notes, they appear with note on and disappear with note off. 
 
 ### Note edition
 (todo)
