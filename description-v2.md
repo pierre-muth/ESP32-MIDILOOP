@@ -25,14 +25,18 @@ We can also record 4 MIDI CC channels in the loop. The CC values are input with 
 The display resolution is W:400 pixels to H:240 pixels, viewing area is approx 58mm x 35mm so rather high pixel density, to be taken in account for IU readability. Drawing can be done with the Adafruit_GFX library.
 
 ## Common UI navigation:
+### Buttons behavior:  
+Buttons are rectangles with information or icon drawn into. The rectangle outline thickness when not selected is 1 pixel and 3 pixels when selected. When the button is activated, the drawing colors are inverted.
+When the selected button is not in an activate state, the rotary encoder rotation cycle the selection through all the UI buttons, selecting one one after the other, only one button is selected at a time.  
+Pressing/clicking the encoder knob on the selected button activate it and has different action/effect depending of the type of the button. Usually the effects are propagated to the data models and update the UI.
 
-The rotary encoder rotation cycle through all the UI button. Pressing the encoder knob on the highlighted button has different action depending of the type of the button.  
-If it's a numerical Value, it enters into the edition of the value by rotating the encoder, a second press exits the edition.  
-If it's an Option button, it enter in edit mode and cycle through the possible option values. Such as "on", "off" or "CH1", "CH2", "CH3", "CH4".  
-If it's the main mode button, pressing the encoder switch the UI to the next mode/UI page. It displays the name of the mode/page.  
-And finally, some buttons are just Label, non editable, can display a number or a string.  
+### Button types:  
+- If it's a numerical **Value**, clicking the encoder activates it and enters into the edition of the value, a second press exits the edition. In edition, rotating the encoder increments or decrements the value.
+- If it's an **Option** button, clicking the encoder activates it and enters into the edition. In edition mode rotating the encoder cycles through the possible option values. Such as an enumeration "on", "off" or "CH1", "CH2", "CH3", "CH4".  
+- If it's the **main** mode button, pressing the encoder switch the UI to the next mode/UI page. It displays the icon of the mode/page. There is no real activation. 
+- And finally, some buttons are just **Label**, non editable, can display a number or a string. An action can be executed if clicked. There is no real activation but it blinks (inverting back and forth the colors) quickly 3 times to signify the action has been performed.  
 
-The buttons are stacked vertically on left side of the screen, leaving the center majority of the screen for the chart. The top button is the mode/page switch button.  
+The buttons are stacked vertically on left side of the screen, leaving the center majority of the screen for the chart. The top button is always the mode/page switch button.  
 The center part UI and behavior is defined for each mode later.
 
 ### The 4 Modes corresponding to different UI pages:
@@ -56,7 +60,7 @@ At the right a 5 pixel column for the RT midi input view.
 - Label: loop length in bars
 
 ### Logic:
-The Run / Stop status is toggled by the physical button on D4. Run mode is playing the loop and send accordingly the notes on/off on the usb midi output. Stopping the loop puts the cursor/play head back at the beginning of the loop and put back the mode to Play.  
+The Run / Stop status is toggled by the physical button on D4. Run mode is playing the loop and send accordingly the notes on/off on the usb midi output, there is an animated scrolling vertical line representing the play head. Stopping the loop puts the cursor/play head back at the beginning of the loop and put back the mode to Play.  
 
 Toggling the from Play to record has two different effect depending on the Run / Stop Status.  
 - If the loop is running, toggling to Record put the system into recording the midi notes received, overdubbing the loop. Notes are not erased by the play head, but if the input note is the same and covers an already recorded note, it prolongs it, basically editing its start (note on) or/and its stop (note off). Pressing again toggles the mode back to Play.
@@ -80,33 +84,44 @@ Light dashed vertical line only every 8 bars (pixel line pattern 1, 0, 0, 0, 0) 
 
 The background shows a grayed version (using a chessboard pattern as the display is monochrome) of the 4 CC curves described in the CC edition part. Only the enabled channels are displayed. 
 
-#### Right column:
+### Right column:
 On the furthermost right, small (4 pixel) triangles pointing left, showing the incoming midi notes, they appear with note on and disappear with note off. 
 
 ## Note edition mode
-This page will allow the edition of each note, delete a note and add new notes.  
+This page will allow the edition of each note recorded in the loop, delete a note and add new notes.  
 
 On the left the vertical stack of buttons ~25% of the horizontal width. The first top button stays the mode/page switch button. They are different of the looper page.
-Center is the note chart, roughly 75%, same as the looper page.  
+Center is the note chart representing all the notes of the loop, roughly 75%, similar to the looper page.  
 At the right a 5 pixel column for the RT midi input view, same as the looper page.  
 
 ### Left buttons below the main mode button:
 - Value: ID 
 - Option: Note name (pitch)
 - Value: start
-- Value: stop
+- Value: duration
 - Value: velocity
+- Option: Quantization On / Off
+- Label: New
+- Label: Delete
 
 ### Logic:
-The note rectangle in the chart selected by the ID button value is surrounded by a rounded rectangle, 3 pixels line width with chessboard pattern (gray).
+Surround the note rectangle in the chart that is selected by the ID button value, by a rounded rectangle of 3 pixels line width with chessboard pattern (gray).  
+Changing the selected ID will cycle through all the recorded notes of the loop. And update the pitch, timing and velocity values.  
+Changing the note name or pitch will move the rectangle to the corresponding vertical position.  
+Changing the start value will move the start of the note rectangle.
+Changing the duration value will move the end of the note rectangle.  
+Changing the velocity will only update the velocity value.
+Quantization on: changing the start and duration values is only possible in full steps of bars, the center chart vertical bar graduations are every bars.   
+Quantization off: changing the start and duration values is possible in tenth of bars. The center chart vertical bar graduations are displayed only every 8 bars.  
+Clicking on New will insert a new note into the loop with an incremented ID and select it. The new note pitch is the value of the last received midi note on. The start value is the same bar as the last selected note. Its default duration is one bar.  
+Clicking on delete erases the selected note from the loop, and the selection goes to the previous note ID.
 
 ### Center chart UI:
-Same as the looper page but without the CC curves on the background. The vertical play head line is not drawn. Light dashed vertical line represents the bars (pixel line pattern 1, 0, 0).
+Same as the looper page but without the CC curves on the background. The vertical play head line is not drawn. Light dashed vertical line represents the bars (pixel line pattern 1, 0, 0). can be every bars if quantization is on or every 8 bars if off.
+The selected note rectangle (by its ID) is surrounded by a rounded rectangle of 3 pixels line width with chessboard pattern (gray).  
 
 ### Right column:
 On the furthermost right, small (4 pixel) triangles pointing left, showing the incoming midi notes, they appear with note on and disappear with note off. 
-
-for a new note, the received midi note can be used to position the note value.
 
 ## CC edition mode
 This page will allow the edition of 4 different curves representing the midi CC values output on the midi usb. We support 4 CC channels, by default 1 to 4 and all muted (no cc midi output).
