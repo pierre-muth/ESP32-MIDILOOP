@@ -60,7 +60,7 @@ At the right a 5 pixel column for the RT midi input view.
 - Label: loop length in bars
 
 ### Logic:
-The Run / Stop status is toggled by the physical button on D4. Run mode is playing the loop and send accordingly the notes on/off on the usb midi output, there is an animated scrolling vertical line representing the play head. Stopping the loop puts the cursor/play head back at the beginning of the loop and put back the mode to Play.  
+The Run / Stop status is toggled by the physical button on D4. Run mode is playing the loop and send accordingly the notes on/off on the usb midi output, there is an animated scrolling vertical line representing the play head. Stopping the loop puts the cursor/play head back at the beginning of the loop, send a note off for all note that was turned on, and put back the mode to Play.  
 
 Toggling the from Play to record has two different effect depending on the Run / Stop Status.  
 - If the loop is running, toggling to Record put the system into recording the midi notes received, overdubbing the loop. Notes are not erased by the play head, but if the input note is the same and covers an already recorded note, it prolongs it, basically editing its start (note on) or/and its stop (note off). Pressing again toggles the mode back to Play.
@@ -124,11 +124,32 @@ The selected note rectangle (by its ID) is surrounded by a rounded rectangle of 
 On the furthermost right, small (4 pixel) triangles pointing left, showing the incoming midi notes, they appear with note on and disappear with note off. 
 
 ## CC edition mode
-This page will allow the edition of 4 different curves representing the midi CC values output on the midi usb. We support 4 CC channels, by default 1 to 4 and all muted (no cc midi output).
-(todo) 256 dots per loop?
+This page will allow the edition of 4 different curves representing the midi CC values output on the midi usb when the loop is running. We support 4 CC channels, by default 1 to 4 and by default all muted (no cc midi output).
+256 dots per loop?
+
+### Left buttons below the main mode button:
+- Label: Run / Stop status
+- Option: Play / Record
+- Option: selected curve number (1 to 4)
+- Option: Muted on / off
+- Value: CC channel (0 to 127)
+
+
+### Logic:
+
+### Center chart UI:
+Selected curve is 3 pixel thick and full. Other curves are 3 pixel thick and gray (chessboard pattern).
+
+### Right column:
+On the furthermost right, small (4 pixel) triangles pointing left, showing the incoming midi notes, they appear with note on and disappear with note off. 
+
 
 ## Setting mode
+This page is dedicated to the settings management.
 
+- loop length in bars
+- playback speed in BPM
+- 
 (todo)
 
 ## Some software guidelines
