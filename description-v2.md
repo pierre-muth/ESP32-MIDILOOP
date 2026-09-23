@@ -6,7 +6,7 @@ The device can be connected to a synthesizer with USB. The device records midi n
 The loop length can be define in bars, such as 8, 16, 24, 32 etc...  
 A note can be define with timings for note ON to note OFF, pitch value, velocity and an ID. At the end of the loop all the ON notes should be set back to OFF. When the loop is running, the notes are sent according to the recorded timings, on the usb midi output. When the loop is running and recording, notes are recorded into the loop but not echoed back, they will be played back at the next loop.  
 The loop speed can be defined in BPM, beat per minute, such as 120BPM.  
-We can also records of 4 MIDI CC channels in the loop, graphically represented as a curve, and they can be muted independently. The CC values are sent to the usb midi out at a 50Hz rate by default, when the loop is running and if there is at least a point on the curve, as the values are interpolated from the curve recorded points. The CC values can be input into the loop from the midi input, but also with a rotary encoder as described later. CC values are between 0 to 127.
+We can also records of 4 MIDI CC channels in the loop, graphically represented as a curve, and they can be muted independently. The CC values are sent to the usb midi out at a 50Hz rate by default, when the loop is running and if there is at least a point on the curve, as the values are interpolated from the curve recorded points. The CC values can be input into the loop from the midi input (not echoed back), but also with a rotary encoder as described later. CC values are between 0 to 127.
 A physical button runs or stops the loop.
 
 ## Project Hardware description:
