@@ -33,11 +33,13 @@ struct CcCurve {
   CcPoint     points[MAX_CC_POINTS];
 };
 
-enum class QuantMode : uint8_t { OFF, ON };
+// Quantization grid: OFF uses continuous positions; the others snap note
+// starts to the nearest multiple of 1, 1/2, 1/4 or 1/8 of a beat.
+enum class QuantMode : uint8_t { OFF, BEAT, HALF, QUARTER, EIGHTH, COUNT };
 
 // Global loop settings. Defaults per description-v2.md section 21 (adapted).
 struct Settings {
-  uint8_t  bars          = 4;
+  uint8_t  bars          = 2;
   uint16_t bpm           = 120;
   uint8_t  ccRateHz      = 50;
   uint8_t  outputChannel = 1;   // 1..16
@@ -65,9 +67,12 @@ namespace Model {
 
   uint32_t loopLengthTicks();
   uint32_t clampToLoop(uint32_t tick);
-  // Rounds a tick position to the nearest beat (used for output/UI
-  // quantization; stored note/CC positions are never altered by this).
-  uint32_t quantizeTickToBeat(uint32_t tick);
+  // Tick size of one quantization step for the given mode (0 for OFF).
+  uint32_t quantStepTicks(QuantMode mode);
+  // Rounds a tick position to the nearest step of the current quantMode
+  // (returns it unchanged when quantMode is OFF). Stored note/CC positions
+  // are never altered by this; it's only used for output/UI quantization.
+  uint32_t quantizeTick(uint32_t tick);
 
   // --- Notes (caller must not hold mutex; these take it internally) ----------
   int16_t findIndexById(uint8_t id);
@@ -105,6 +110,9 @@ namespace Model {
   void addOrUpdatePoint(uint8_t curveIdx, uint32_t positionTick, uint8_t value);
   void clearCurve(uint8_t curveIdx);
   uint8_t curveValueAt(uint8_t curveIdx, uint32_t positionTick);
+  // Removes every point strictly after `tick` (used when a LOCAL CC
+  // recording starts overriding the curve from the playhead onward).
+  void erasePointsAfter(uint8_t curveIdx, uint32_t tick);
 
   // --- misc ----------------------------------------------------------------
   // Writes a short note name (e.g. "C#4") for the given MIDI pitch.

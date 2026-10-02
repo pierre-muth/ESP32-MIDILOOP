@@ -41,27 +41,35 @@ static inline Channel outputChannel() {
   return Channel::createChannel(Model::settings.outputChannel);
 }
 
-static void finalizeHeldNote(uint8_t pitch) {
+static void finalizeHeldNote(uint8_t pitch, uint32_t endOverride, bool useOverride) {
   if (!held[pitch].active) return;
   uint32_t start = held[pitch].startTick;
-  uint32_t end = Transport::state == TransportState::RUNNING ? Transport::currentTick()
-                                                               : Transport::lastStopTick;
+  uint32_t end = useOverride ? endOverride
+               : (Transport::state == TransportState::RUNNING ? Transport::currentTick()
+                                                                : Transport::lastStopTick);
   if (end <= start) end = start + 1;
   Model::addOrMergeNote(pitch, held[pitch].velocity, start, end);
   held[pitch].active = false;
 }
 
 static void finalizeAllHeldNotes() {
-  for (uint16_t pitch = 0; pitch < 128; pitch++) finalizeHeldNote((uint8_t)pitch);
+  for (uint16_t pitch = 0; pitch < 128; pitch++) finalizeHeldNote((uint8_t)pitch, 0, false);
+}
+
+// Used when a one-shot (ARMED_ONCE) note recording ends exactly at the loop
+// boundary: the tick has already wrapped back near 0, so the real end
+// position (the loop length) must be passed in explicitly.
+static void finalizeAllHeldNotesAt(uint32_t endTick) {
+  for (uint16_t pitch = 0; pitch < 128; pitch++) finalizeHeldNote((uint8_t)pitch, endTick, true);
 }
 
 static void handleNoteOn(uint8_t pitch, uint8_t velocity) {
   Model::lastInputPitch = pitch;
   activeInputNote[pitch] = true;
 
-  if (Transport::noteRecord == RecordState::ARMED && Transport::state == TransportState::STOPPED) {
-    Transport::start();
-    Transport::noteRecord = RecordState::RECORD;
+  if (Transport::state == TransportState::STOPPED &&
+      (Transport::noteRecord == RecordState::ARMED || Transport::noteRecord == RecordState::ARMED_ONCE)) {
+    Transport::start(); // auto-transitions noteRecord to RECORD
   }
   if (Transport::noteRecord == RecordState::RECORD && Transport::state == TransportState::RUNNING) {
     held[pitch].active = true;
@@ -72,7 +80,7 @@ static void handleNoteOn(uint8_t pitch, uint8_t velocity) {
 
 static void handleNoteOff(uint8_t pitch) {
   activeInputNote[pitch] = false;
-  finalizeHeldNote(pitch);
+  finalizeHeldNote(pitch, 0, false);
 }
 
 static void handleCcIn(uint8_t ccNumber, uint8_t value) {
@@ -82,10 +90,9 @@ static void handleCcIn(uint8_t ccNumber, uint8_t value) {
   lastCcInputValue[curveIdx] = value;
   if (curve.inputMode != CcInputMode::MIDI_IN) return;
 
-  if (Transport::ccRecord == RecordState::ARMED && Transport::state == TransportState::STOPPED) {
-    Transport::start();
-    Transport::ccRecord = RecordState::RECORD;
-    Transport::ccRecordAutoStop = true;
+  if (Transport::state == TransportState::STOPPED &&
+      (Transport::ccRecord == RecordState::ARMED || Transport::ccRecord == RecordState::ARMED_ONCE)) {
+    Transport::start(); // auto-transitions ccRecord to RECORD
   }
   if (Transport::ccRecord == RecordState::RECORD && Transport::state == TransportState::RUNNING) {
     Model::addOrUpdatePoint(curveIdx, Transport::currentTick(), value);
@@ -113,12 +120,13 @@ static bool crossed(uint32_t prev, uint32_t cur, uint32_t target) {
   return target > prev && target <= cur;
 }
 
-static uint32_t effectiveStart(const Note &n) {
-  return Model::quantMode == QuantMode::ON ? Model::quantizeTickToBeat(n.startTick) : n.startTick;
+static uint32_t effectiveStart(const Note &n, uint32_t length) {
+  if (Model::quantMode == QuantMode::OFF) return n.startTick;
+  return std::min(Model::quantizeTick(n.startTick), length);
 }
 
 static uint32_t effectiveEnd(const Note &n, uint32_t length) {
-  uint32_t e = Model::quantMode == QuantMode::ON ? Model::quantizeTickToBeat(n.endTick()) : n.endTick();
+  uint32_t e = effectiveStart(n, length) + n.durationTick;
   return e > length ? length : e;
 }
 
@@ -142,7 +150,7 @@ static void scheduleNotes(uint32_t tick, bool wrapped) {
       for (uint16_t i = 0; i < Model::noteCount; i++) {
         const Note &n = Model::notes[i];
         if (n.startTick >= length) continue;
-        if (effectiveStart(n) == 0) {
+        if (effectiveStart(n, length) == 0) {
           midi.sendNoteOn(MIDIAddress(n.pitch, ch), n.velocity);
           outputActive[n.pitch] = true;
         }
@@ -155,7 +163,7 @@ static void scheduleNotes(uint32_t tick, bool wrapped) {
   for (uint16_t i = 0; i < Model::noteCount; i++) {
     const Note &n = Model::notes[i];
     if (n.startTick >= length) continue;
-    uint32_t s = effectiveStart(n);
+    uint32_t s = effectiveStart(n, length);
     uint32_t e = effectiveEnd(n, length);
     if (e <= s) e = (s < length) ? s + 1 : length;
     if (!outputActive[n.pitch] && s > 0 && crossed(previousTick, tick, s)) {
@@ -260,7 +268,15 @@ static void taskMidi(void *) {
     bool wrapped = justStarted || tick < previousTick;
 
     if (wrapped && !justStarted) {
-      // A CC recording that was auto-started from ARMED runs for exactly one cycle.
+      // A recording that was auto-started from ARMED_ONCE runs for exactly
+      // one cycle; notes must be finalized at the loop boundary itself,
+      // since the tick has already wrapped back near 0 by this point.
+      if (Transport::noteRecordAutoStop && noteRecord == RecordState::RECORD) {
+        finalizeAllHeldNotesAt(length);
+        Transport::noteRecord = RecordState::PLAY;
+        Transport::noteRecordAutoStop = false;
+        noteRecord = RecordState::PLAY;
+      }
       if (Transport::ccRecordAutoStop && ccRecord == RecordState::RECORD) {
         Transport::ccRecord = RecordState::PLAY;
         Transport::ccRecordAutoStop = false;
@@ -289,14 +305,17 @@ void applyLocalCcDelta(int16_t delta) {
   uint8_t curveIdx = Model::selectedCurve;
   if (Model::ccCurves[curveIdx].inputMode != CcInputMode::LOCAL) return;
 
-  if (Transport::ccRecord == RecordState::ARMED && Transport::state == TransportState::STOPPED) {
-    Transport::start();
-    Transport::ccRecord = RecordState::RECORD;
-    Transport::ccRecordAutoStop = true;
+  if (Transport::state == TransportState::STOPPED &&
+      (Transport::ccRecord == RecordState::ARMED || Transport::ccRecord == RecordState::ARMED_ONCE)) {
+    Transport::start(); // auto-transitions ccRecord to RECORD
     localCcValue = Model::curveValueAt(curveIdx, 0);
+    localCcFollowing = true; // this call's delta is the first override below
   }
   if (Transport::ccRecord != RecordState::RECORD) return;
 
+  // The first override of a recording session erases any existing points
+  // ahead of the playhead, so only the new recording remains from here on.
+  if (localCcFollowing) Model::erasePointsAfter(curveIdx, Transport::currentTick());
   localCcFollowing = false;
   int v = (int)localCcValue + delta;
   localCcValue = (uint8_t)constrain(v, 0, 127);

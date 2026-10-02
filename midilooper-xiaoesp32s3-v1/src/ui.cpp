@@ -25,10 +25,27 @@ static void startBlink(uint8_t idx) {
   blinkStartUs = (uint64_t)esp_timer_get_time();
 }
 
-// Quantized edit step is one beat (quarter note in 4/4, i.e. 0.25 bar);
-// non-quantized uses hundredths of a bar for fine, "analog" positioning.
+// Quantized edit step matches the selected quantization grid; non-quantized
+// uses hundredths of a bar for fine, "analog" positioning.
 static uint32_t editStep() {
-  return Model::quantMode == QuantMode::ON ? TICKS_PER_BEAT : TICKS_PER_BAR / 100;
+  uint32_t step = Model::quantStepTicks(Model::quantMode);
+  return step != 0 ? step : TICKS_PER_BAR / 100;
+}
+
+static void quantModeText(char *b, size_t n) {
+  switch (Model::quantMode) {
+    case QuantMode::BEAT:    snprintf(b, n, "QUANT 1"); break;
+    case QuantMode::HALF:    snprintf(b, n, "QUANT 1/2"); break;
+    case QuantMode::QUARTER: snprintf(b, n, "QUANT 1/4"); break;
+    case QuantMode::EIGHTH:  snprintf(b, n, "QUANT 1/8"); break;
+    default:                 snprintf(b, n, "QUANT OFF"); break;
+  }
+}
+static void quantModeEncoder(int16_t delta) {
+  if (!delta) return;
+  int count = (int)QuantMode::COUNT;
+  int v = (((int)Model::quantMode + delta) % count + count) % count;
+  Model::quantMode = (QuantMode)v;
 }
 
 // ── Looper page ───────────────────────────────────────────────────────────────
@@ -39,30 +56,25 @@ static void lp_runstopText(char *b, size_t n) {
 static bool lp_runstopActive() { return Transport::state == TransportState::RUNNING; }
 static void lp_recordText(char *b, size_t n) {
   switch (Transport::noteRecord) {
-    case RecordState::RECORD: snprintf(b, n, "REC"); break;
-    case RecordState::ARMED:  snprintf(b, n, "ARM"); break;
-    default:                  snprintf(b, n, "PLAY"); break;
+    case RecordState::RECORD:     snprintf(b, n, "REC"); break;
+    case RecordState::ARMED:      snprintf(b, n, "ARM"); break;
+    case RecordState::ARMED_ONCE: snprintf(b, n, "ARM1"); break;
+    default:                      snprintf(b, n, "PLAY"); break;
   }
 }
 static bool lp_recordActive() { return Transport::noteRecord != RecordState::PLAY; }
 static void lp_recordClick() { Transport::toggleNoteRecord(); }
-static void lp_quantText(char *b, size_t n) {
-  snprintf(b, n, "QUANT %s", Model::quantMode == QuantMode::ON ? "ON" : "OFF");
-}
-static void lp_quantEncoder(int16_t delta) {
-  if (delta) Model::quantMode = Model::quantMode == QuantMode::ON ? QuantMode::OFF : QuantMode::ON;
-}
 static void lp_bpmText(char *b, size_t n) { snprintf(b, n, "BPM %u", Model::settings.bpm); }
 static void lp_bpmEncoder(int16_t delta) { Transport::setBpm((int)Model::settings.bpm + delta); }
 static void lp_barsText(char *b, size_t n) { snprintf(b, n, "%u BARS", Model::settings.bars); }
 
 static const Field looperFields[] = {
-  { FieldType::MAIN,   lp_mainText,    nullptr,         nullptr,        nullptr,          false },
-  { FieldType::LABEL,  lp_runstopText, nullptr,         nullptr,        lp_runstopActive, false },
-  { FieldType::LABEL,  lp_recordText,  nullptr,         lp_recordClick, lp_recordActive,  false },
-  { FieldType::OPTION, lp_quantText,   lp_quantEncoder, nullptr,        nullptr,          false },
-  { FieldType::VALUE,  lp_bpmText,     lp_bpmEncoder,   nullptr,        nullptr,          false },
-  { FieldType::LABEL,  lp_barsText,    nullptr,         nullptr,        nullptr,          false },
+  { FieldType::MAIN,   lp_mainText,    nullptr,          nullptr,        nullptr,          false },
+  { FieldType::LABEL,  lp_runstopText, nullptr,          nullptr,        lp_runstopActive, false },
+  { FieldType::LABEL,  lp_recordText,  nullptr,          lp_recordClick, lp_recordActive,  false },
+  { FieldType::OPTION, quantModeText,  quantModeEncoder, nullptr,        nullptr,          false },
+  { FieldType::VALUE,  lp_bpmText,     lp_bpmEncoder,    nullptr,        nullptr,          false },
+  { FieldType::LABEL,  lp_barsText,    nullptr,          nullptr,        nullptr,          false },
 };
 
 // ── Note Edit page ────────────────────────────────────────────────────────────
@@ -143,13 +155,6 @@ static void ne_velocityEncoder(int16_t delta) {
     MidiEngine::requestNotePreview(note.pitch, (uint8_t)newVel);
 }
 
-static void ne_quantText(char *b, size_t n) {
-  snprintf(b, n, "QUANT %s", Model::quantMode == QuantMode::ON ? "ON" : "OFF");
-}
-static void ne_quantEncoder(int16_t delta) {
-  if (delta) Model::quantMode = Model::quantMode == QuantMode::ON ? QuantMode::OFF : QuantMode::ON;
-}
-
 static void ne_newText(char *b, size_t n) { snprintf(b, n, "NEW"); }
 static void ne_newClick() {
   uint32_t start = 0;
@@ -176,7 +181,7 @@ static const Field noteEditFields[] = {
   { FieldType::VALUE,  ne_startText,    ne_startEncoder,     nullptr,        nullptr, false },
   { FieldType::VALUE,  ne_durationText, ne_durationEncoder,  nullptr,        nullptr, false },
   { FieldType::VALUE,  ne_velocityText, ne_velocityEncoder,  nullptr,        nullptr, false },
-  { FieldType::OPTION, ne_quantText,    ne_quantEncoder,     nullptr,        nullptr, false },
+  { FieldType::OPTION, quantModeText,   quantModeEncoder,    nullptr,        nullptr, false },
   { FieldType::LABEL,  ne_newText,      nullptr,             ne_newClick,    nullptr, true },
   { FieldType::LABEL,  ne_deleteText,   nullptr,             ne_deleteClick, nullptr, true },
 };
@@ -196,16 +201,21 @@ static void cc_curveEncoder(int16_t delta) {
 }
 static void cc_recordText(char *b, size_t n) {
   switch (Transport::ccRecord) {
-    case RecordState::RECORD: snprintf(b, n, "REC"); break;
-    case RecordState::ARMED:  snprintf(b, n, "ARM"); break;
-    default:                  snprintf(b, n, "PLAY"); break;
+    case RecordState::RECORD:     snprintf(b, n, "REC"); break;
+    case RecordState::ARMED:      snprintf(b, n, "ARM"); break;
+    case RecordState::ARMED_ONCE: snprintf(b, n, "ARM1"); break;
+    default:                      snprintf(b, n, "PLAY"); break;
   }
 }
 static bool cc_recordActive() { return Transport::ccRecord != RecordState::PLAY; }
-static void cc_recordClick() {
+// Leaving PLAY (to ARMED/ARMED_ONCE/RECORD) (re)starts the LOCAL "follow the
+// curve" baseline, so a stale state from an earlier session never skips the
+// erase-ahead-of-playhead step on the next recording's first knob turn.
+static void cycleCcRecord() {
   Transport::toggleCcRecord();
-  if (Transport::ccRecord == RecordState::RECORD) MidiEngine::notifyCcRecordStarted();
+  if (Transport::ccRecord != RecordState::PLAY) MidiEngine::notifyCcRecordStarted();
 }
+static void cc_recordClick() { cycleCcRecord(); }
 static void cc_inputModeText(char *b, size_t n) {
   snprintf(b, n, "%s", Model::ccCurves[Model::selectedCurve].inputMode == CcInputMode::LOCAL ? "LOCAL" : "MIDI IN");
 }
@@ -297,7 +307,7 @@ static void switchPage() {
 }
 
 static bool ccLocalRecordOverride() {
-  return page == Page::CC_EDIT && Transport::ccRecord == RecordState::RECORD &&
+  return page == Page::CC_EDIT && Transport::ccRecord != RecordState::PLAY &&
          Model::ccCurves[Model::selectedCurve].inputMode == CcInputMode::LOCAL;
 }
 
@@ -310,11 +320,16 @@ void init() {
 }
 
 void update(int16_t encoderDelta, bool encClicked) {
-  // While a LOCAL CC recording session is active, the encoder is dedicated to
-  // curve value input; clicking exits recording (description-v2.md CC Edit).
+  // While arming or recording a LOCAL CC curve, rotation is dedicated to
+  // curve value input (so the first turn itself can trigger ARMED -> RECORD).
+  // Clicking still cycles ARMED -> ARMED_ONCE -> PLAY normally; it only
+  // cancels straight back to Play once actually recording.
   if (ccLocalRecordOverride()) {
     if (encoderDelta) MidiEngine::applyLocalCcDelta(encoderDelta);
-    if (encClicked) Transport::toggleCcRecord();
+    if (encClicked) {
+      if (Transport::ccRecord == RecordState::RECORD) Transport::exitCcRecord();
+      else cycleCcRecord();
+    }
     return;
   }
 

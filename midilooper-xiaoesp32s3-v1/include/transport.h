@@ -6,7 +6,10 @@
 #include "model.h"
 
 enum class TransportState : uint8_t { STOPPED, RUNNING };
-enum class RecordState : uint8_t { PLAY, RECORD, ARMED };
+// PLAY: not recording. ARMED: waiting for the first input, then records
+// indefinitely. ARMED_ONCE: waiting for the first input, then records for
+// exactly one loop cycle before automatically returning to PLAY.
+enum class RecordState : uint8_t { PLAY, RECORD, ARMED, ARMED_ONCE };
 
 namespace Transport {
 
@@ -19,8 +22,10 @@ namespace Transport {
   extern volatile RecordState noteRecord;
   extern volatile RecordState ccRecord;
 
-  // True while ccRecord is running only because it was armed from STOPPED;
-  // such a recording session auto-reverts to PLAY after one full loop cycle.
+  // True while noteRecord/ccRecord is running only because it was armed via
+  // ARMED_ONCE; such a recording session auto-reverts to PLAY after one full
+  // loop cycle (see MidiEngine's loop-wrap handling).
+  extern volatile bool noteRecordAutoStop;
   extern volatile bool ccRecordAutoStop;
 
   extern volatile uint64_t loopStartUs;
@@ -33,8 +38,10 @@ namespace Transport {
   // Current playhead position in ticks (0 when stopped).
   uint32_t currentTick();
 
-  // Starts the playhead running from position 0. Does not touch noteRecord/
-  // ccRecord; callers (UI / MIDI engine) manage those transitions.
+  // Starts the playhead running from position 0. If noteRecord/ccRecord is
+  // ARMED or ARMED_ONCE, immediately converts it to an actual RECORD session
+  // (this is the "loop is started" trigger, in addition to the first
+  // recordable MIDI input handled by the MIDI engine).
   void start();
   // Stops the playhead, resets it to 0, and returns both recording flags to
   // PLAY. Note-off flushing is performed by the MIDI engine, which detects
@@ -47,7 +54,12 @@ namespace Transport {
 
   // UI-facing toggles ---------------------------------------------------------
   void toggleRunStop();   // also invoked by the physical D4 button
+  // While stopped, cycles PLAY -> ARMED -> ARMED_ONCE -> PLAY. While running,
+  // toggles PLAY <-> RECORD directly (continuous, no auto-stop).
   void toggleNoteRecord();
   void toggleCcRecord();
+  // Forces ccRecord back to PLAY unconditionally; used when the UI exits a
+  // LOCAL CC recording session that has taken over the rotary encoder.
+  void exitCcRecord();
 
 } // namespace Transport

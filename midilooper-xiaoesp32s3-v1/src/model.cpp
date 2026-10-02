@@ -42,9 +42,21 @@ uint32_t clampToLoop(uint32_t tick) {
   return tick >= length ? length - 1 : tick;
 }
 
-uint32_t quantizeTickToBeat(uint32_t tick) {
-  uint32_t half = TICKS_PER_BEAT / 2;
-  return ((tick + half) / TICKS_PER_BEAT) * TICKS_PER_BEAT;
+uint32_t quantStepTicks(QuantMode mode) {
+  switch (mode) {
+    case QuantMode::BEAT:    return TICKS_PER_BEAT;
+    case QuantMode::HALF:    return TICKS_PER_BEAT / 2;
+    case QuantMode::QUARTER: return TICKS_PER_BEAT / 4;
+    case QuantMode::EIGHTH:  return TICKS_PER_BEAT / 8;
+    default:                 return 0; // OFF
+  }
+}
+
+uint32_t quantizeTick(uint32_t tick) {
+  uint32_t step = quantStepTicks(quantMode);
+  if (step == 0) return tick;
+  uint32_t half = step / 2;
+  return ((tick + half) / step) * step;
 }
 
 int16_t findIndexById(uint8_t id) {
@@ -278,6 +290,17 @@ void clearCurve(uint8_t curveIdx) {
   }
 }
 
+void erasePointsAfter(uint8_t curveIdx, uint32_t tick) {
+  if (curveIdx >= CC_CURVE_COUNT) return;
+  CcCurve &curve = ccCurves[curveIdx];
+  if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return;
+  uint16_t kept = 0;
+  for (uint16_t i = 0; i < curve.pointCount; i++)
+    if (curve.points[i].positionTick <= tick) curve.points[kept++] = curve.points[i];
+  curve.pointCount = kept;
+  xSemaphoreGive(mutex);
+}
+
 uint8_t curveValueAt(uint8_t curveIdx, uint32_t positionTick) {
   if (curveIdx >= CC_CURVE_COUNT) return 0;
   const CcCurve &curve = ccCurves[curveIdx];
@@ -312,8 +335,9 @@ void init() {
   memset(ccCurves, 0, sizeof(ccCurves));
   for (uint8_t i = 0; i < CC_CURVE_COUNT; i++) {
     ccCurves[i].ccNumber = (uint8_t)(i + 1);
-    ccCurves[i].muted = true;
-    ccCurves[i].inputMode = CcInputMode::MIDI_IN;
+    // Curve 1 is unmuted and LOCAL by default; the rest start muted/MIDI IN.
+    ccCurves[i].muted = (i != 0);
+    ccCurves[i].inputMode = (i == 0) ? CcInputMode::LOCAL : CcInputMode::MIDI_IN;
     ccCurves[i].pointCount = 0;
   }
   selectedCurve = 0;

@@ -46,19 +46,32 @@ static void drawDashedVLine(int16_t x, const uint8_t *pattern, uint8_t len) {
     if (pattern[i]) display.drawPixel(x, y, COLOR_BLACK);
 }
 
-// Bar/beat dashed grid, shared by the Looper, Note Edit and CC Edit pages.
+// Bar/beat(/subdivision) dashed grid, shared by the Looper, Note Edit and CC
+// Edit pages. While quantized, subdivision markers are added for grids finer
+// than one beat (half/quarter/eighth).
 static void drawBarBeatGrid() {
   uint32_t bars = Model::settings.bars;
   if (bars == 0) return;
-  bool q = Model::quantMode == QuantMode::ON;
+  bool q = Model::quantMode != QuantMode::OFF;
   static const uint8_t barOn[2]   = { 1, 0 };
+  static const uint8_t beatOn[3]  = { 1, 0, 0 };
+  static const uint8_t subOn[4]   = { 1, 0, 0, 0 };
   static const uint8_t barOff[3]  = { 1, 0, 0 };
-  static const uint8_t beatOn[4]  = { 1, 0, 0, 0 };
   static const uint8_t beatOff[5] = { 1, 0, 0, 0, 0 };
+
+  uint32_t length = bars * TICKS_PER_BAR;
+  uint32_t subStep = Model::quantStepTicks(Model::quantMode);
+  if (q && subStep > 0 && subStep < TICKS_PER_BEAT) {
+    for (uint32_t tick = 0; tick < length; tick += subStep) {
+      if (tick % TICKS_PER_BEAT == 0) continue; // already drawn as a beat/bar line
+      drawDashedVLine(tickX(tick), subOn, 4);
+    }
+  }
+
   for (uint32_t beat = 0; beat < bars * 4; beat++) {
     int16_t x = tickX(beat * TICKS_PER_BEAT);
     if (beat % 4 == 0) drawDashedVLine(x, q ? barOn : barOff, q ? 2 : 3);
-    else drawDashedVLine(x, q ? beatOn : beatOff, q ? 4 : 5);
+    else drawDashedVLine(x, q ? beatOn : beatOff, q ? 3 : 5);
   }
 }
 
@@ -75,14 +88,14 @@ static void drawNoteRect(const Note &n, uint32_t length) {
     return;
   }
 
-  // Quantized: always draw the full stored note span, then show any
-  // deviation from the quantized (actually played) timing - an extension
-  // beyond the rectangle as a thin black line, a shortening as a thin white
-  // notch cut into the rectangle.
+  // Quantized: only the start snaps to the grid, duration is unchanged, so
+  // the played note is the stored one translated by (quantized - raw) start.
+  // An extension beyond the rectangle is shown as a thin black line, a
+  // shortening as a thin white notch cut into the rectangle.
   uint32_t rawStart = n.startTick;
   uint32_t rawEnd = std::min(n.endTick(), length);
-  uint32_t qStart = std::min(Model::quantizeTickToBeat(rawStart), length);
-  uint32_t qEnd = std::min(Model::quantizeTickToBeat(n.endTick()), length);
+  uint32_t qStart = std::min(Model::quantizeTick(rawStart), length);
+  uint32_t qEnd = std::min(qStart + n.durationTick, length);
 
   int16_t x1 = tickX(rawStart), x2 = tickX(rawEnd);
   if (x2 <= x1) x2 = x1 + 2;

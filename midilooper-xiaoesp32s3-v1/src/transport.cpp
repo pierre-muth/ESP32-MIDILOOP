@@ -9,6 +9,7 @@ namespace Transport {
 volatile TransportState state = TransportState::STOPPED;
 volatile RecordState noteRecord = RecordState::PLAY;
 volatile RecordState ccRecord = RecordState::PLAY;
+volatile bool noteRecordAutoStop = false;
 volatile bool ccRecordAutoStop = false;
 
 volatile uint64_t loopStartUs = 0;
@@ -29,6 +30,7 @@ void init() {
   state = TransportState::STOPPED;
   noteRecord = RecordState::PLAY;
   ccRecord = RecordState::PLAY;
+  noteRecordAutoStop = false;
   ccRecordAutoStop = false;
   loopStartUs = 0;
   lastStopTick = 0;
@@ -45,6 +47,16 @@ uint32_t currentTick() {
 void start() {
   loopStartUs = (uint64_t)esp_timer_get_time();
   state = TransportState::RUNNING;
+  // Arming converts to an actual recording session as soon as the loop
+  // starts running (the MIDI engine separately converts it on first input).
+  if (noteRecord == RecordState::ARMED || noteRecord == RecordState::ARMED_ONCE) {
+    noteRecordAutoStop = (noteRecord == RecordState::ARMED_ONCE);
+    noteRecord = RecordState::RECORD;
+  }
+  if (ccRecord == RecordState::ARMED || ccRecord == RecordState::ARMED_ONCE) {
+    ccRecordAutoStop = (ccRecord == RecordState::ARMED_ONCE);
+    ccRecord = RecordState::RECORD;
+  }
 }
 
 void stop() {
@@ -52,6 +64,7 @@ void stop() {
   state = TransportState::STOPPED;
   noteRecord = RecordState::PLAY;
   ccRecord = RecordState::PLAY;
+  noteRecordAutoStop = false;
   ccRecordAutoStop = false;
   loopStartUs = 0;
 }
@@ -84,7 +97,11 @@ void toggleRunStop() {
 
 void toggleNoteRecord() {
   if (state == TransportState::STOPPED) {
-    noteRecord = (noteRecord == RecordState::ARMED) ? RecordState::PLAY : RecordState::ARMED;
+    switch (noteRecord) {
+      case RecordState::PLAY:  noteRecord = RecordState::ARMED; break;
+      case RecordState::ARMED: noteRecord = RecordState::ARMED_ONCE; break;
+      default:                 noteRecord = RecordState::PLAY; break;
+    }
   } else {
     noteRecord = (noteRecord == RecordState::RECORD) ? RecordState::PLAY : RecordState::RECORD;
   }
@@ -92,7 +109,11 @@ void toggleNoteRecord() {
 
 void toggleCcRecord() {
   if (state == TransportState::STOPPED) {
-    ccRecord = (ccRecord == RecordState::ARMED) ? RecordState::PLAY : RecordState::ARMED;
+    switch (ccRecord) {
+      case RecordState::PLAY:  ccRecord = RecordState::ARMED; break;
+      case RecordState::ARMED: ccRecord = RecordState::ARMED_ONCE; break;
+      default:                 ccRecord = RecordState::PLAY; break;
+    }
   } else {
     if (ccRecord == RecordState::RECORD) {
       ccRecord = RecordState::PLAY;
@@ -101,6 +122,11 @@ void toggleCcRecord() {
       ccRecordAutoStop = false; // activated while already running: continuous
     }
   }
+}
+
+void exitCcRecord() {
+  ccRecord = RecordState::PLAY;
+  ccRecordAutoStop = false;
 }
 
 } // namespace Transport
