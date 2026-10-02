@@ -317,7 +317,7 @@ void applyLocalCcDelta(int16_t delta) {
   // ahead of the playhead, so only the new recording remains from here on.
   if (localCcFollowing) Model::erasePointsAfter(curveIdx, Transport::currentTick());
   localCcFollowing = false;
-  int v = (int)localCcValue + delta;
+  int v = (int)localCcValue + delta * (int)Model::settings.ccKnobSensitivity;
   localCcValue = (uint8_t)constrain(v, 0, 127);
   localCcDirty = true;
   Model::addOrUpdatePoint(curveIdx, Transport::currentTick(), localCcValue);

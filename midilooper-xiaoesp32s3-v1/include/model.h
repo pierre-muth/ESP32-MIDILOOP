@@ -39,10 +39,11 @@ enum class QuantMode : uint8_t { OFF, BEAT, HALF, QUARTER, EIGHTH, COUNT };
 
 // Global loop settings. Defaults per description-v2.md section 21 (adapted).
 struct Settings {
-  uint8_t  bars          = 2;
-  uint16_t bpm           = 120;
-  uint8_t  ccRateHz      = 50;
-  uint8_t  outputChannel = 1;   // 1..16
+  uint8_t  bars             = 2;
+  uint16_t bpm              = 120;
+  uint8_t  ccRateHz         = 50;
+  uint8_t  outputChannel    = 1;   // 1..16
+  uint8_t  ccKnobSensitivity = 1;  // multiplies each encoder step for LOCAL CC input
 };
 
 namespace Model {

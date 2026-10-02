@@ -67,6 +67,8 @@ static void lp_recordClick() { Transport::toggleNoteRecord(); }
 static void lp_bpmText(char *b, size_t n) { snprintf(b, n, "BPM %u", Model::settings.bpm); }
 static void lp_bpmEncoder(int16_t delta) { Transport::setBpm((int)Model::settings.bpm + delta); }
 static void lp_barsText(char *b, size_t n) { snprintf(b, n, "%u BARS", Model::settings.bars); }
+static void lp_clearText(char *b, size_t n) { snprintf(b, n, "CLEAR"); }
+static void lp_clearClick() { Model::clearAllNotes(); }
 
 static const Field looperFields[] = {
   { FieldType::MAIN,   lp_mainText,    nullptr,          nullptr,        nullptr,          false },
@@ -75,6 +77,7 @@ static const Field looperFields[] = {
   { FieldType::OPTION, quantModeText,  quantModeEncoder, nullptr,        nullptr,          false },
   { FieldType::VALUE,  lp_bpmText,     lp_bpmEncoder,    nullptr,        nullptr,          false },
   { FieldType::LABEL,  lp_barsText,    nullptr,          nullptr,        nullptr,          false },
+  { FieldType::LABEL,  lp_clearText,   nullptr,          lp_clearClick,  nullptr,          true },
 };
 
 // ── Note Edit page ────────────────────────────────────────────────────────────
@@ -271,6 +274,11 @@ static void st_channelEncoder(int16_t delta) {
   int v = constrain((int)Model::settings.outputChannel + delta, (int)MIN_MIDI_CHANNEL, (int)MAX_MIDI_CHANNEL);
   Model::settings.outputChannel = (uint8_t)v;
 }
+static void st_ccSensText(char *b, size_t n) { snprintf(b, n, "CC KNOB SENS %u", Model::settings.ccKnobSensitivity); }
+static void st_ccSensEncoder(int16_t delta) {
+  int v = constrain((int)Model::settings.ccKnobSensitivity + delta, (int)MIN_CC_KNOB_SENS, (int)MAX_CC_KNOB_SENS);
+  Model::settings.ccKnobSensitivity = (uint8_t)v;
+}
 
 static const Field settingsFields[] = {
   { FieldType::MAIN,  st_mainText,    nullptr,           nullptr, nullptr, false },
@@ -278,6 +286,7 @@ static const Field settingsFields[] = {
   { FieldType::VALUE, st_bpmText,     st_bpmEncoder,     nullptr, nullptr, false },
   { FieldType::VALUE, st_ccRateText,  st_ccRateEncoder,  nullptr, nullptr, false },
   { FieldType::VALUE, st_channelText, st_channelEncoder, nullptr, nullptr, false },
+  { FieldType::VALUE, st_ccSensText,  st_ccSensEncoder,  nullptr, nullptr, false },
 };
 
 // ── Page/field lookup + navigation ────────────────────────────────────────────

@@ -42,6 +42,8 @@ static const uint8_t  MIN_CC_RATE_HZ  = 1;
 static const uint8_t  MAX_CC_RATE_HZ  = 200;
 static const uint8_t  MIN_MIDI_CHANNEL = 1;
 static const uint8_t  MAX_MIDI_CHANNEL = 16;
+static const uint8_t  MIN_CC_KNOB_SENS = 1;
+static const uint8_t  MAX_CC_KNOB_SENS = 10;
 
 // ── Display geometry (400x240 Sharp Memory LCD) ───────────────────────────────
 static const int16_t DISPLAY_W = 400;
