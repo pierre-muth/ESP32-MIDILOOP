@@ -46,5 +46,5 @@ void loop() {
                     Transport::ccRecord == RecordState::RECORD;
   digitalWrite(LED_BUILTIN, recording ? LOW : HIGH);
 
-  delay(10); // ~100 Hz UI poll
+  delay(5); // UI poll
 }

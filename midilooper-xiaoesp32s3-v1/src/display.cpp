@@ -19,6 +19,8 @@ static Adafruit_SharpMem display(PIN_SHARP_SCK, PIN_SHARP_MOSI, PIN_SHARP_SS, DI
 static const uint8_t NOTE_LOW = 36;
 static const uint8_t NOTE_HIGH = 96;
 
+int64_t startRenderLoopUs;
+
 static int16_t noteY(uint8_t pitch) {
   int v = constrain((int)pitch, (int)NOTE_LOW, (int)NOTE_HIGH);
   return (int16_t)(DISPLAY_H - 1 - (v - NOTE_LOW) * (DISPLAY_H - 1) / (NOTE_HIGH - NOTE_LOW));
@@ -297,7 +299,8 @@ static void drawButtons() {
 
 // ── Frame assembly ────────────────────────────────────────────────────────────
 static void renderFrame() {
-  display.fillScreen(COLOR_WHITE);
+  display.clearDisplayBuffer();
+  
   Page page = UI::currentPage();
 
   if (page == Page::SETTINGS) {
@@ -341,15 +344,24 @@ static void renderFrame() {
 }
 
 static void taskDisplay(void *) {
+  esp_timer_get_time(); // warm up the timer to avoid a long first call
   display.begin();
-  display.fillScreen(COLOR_WHITE);
+  display.clearDisplayBuffer();
   display.refresh();
+
+  float fps;
+  int spiSpeed;
+  startRenderLoopUs = (int64_t)esp_timer_get_time();
+
   for (;;) {
+    fps = (float)(1000000.0f / (float)(esp_timer_get_time() - startRenderLoopUs));
+    startRenderLoopUs = (int64_t)esp_timer_get_time();
     renderFrame();
-    vTaskDelay(pdMS_TO_TICKS(50)); // ~20 FPS target per description-v2.md
+    // DBG_PRINTLN("[taskDisplay] FPS: "+String(fps)+", Render time: "+String((int64_t)esp_timer_get_time() - startRenderLoopUs)+" us");
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
 
 void displayTaskStart() {
-  xTaskCreatePinnedToCore(taskDisplay, "display", 8192, nullptr, 2, nullptr, 1);
+  xTaskCreatePinnedToCore(taskDisplay, "display", 8192, nullptr, 3, nullptr, 1);
 }
