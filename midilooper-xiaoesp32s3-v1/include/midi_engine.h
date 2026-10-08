@@ -24,7 +24,7 @@ namespace MidiEngine {
   // Current value driven by the rotary encoder while recording a LOCAL CC
   // curve (either "following" the existing curve, or overriding it).
   extern volatile uint8_t localCcValue;
-  extern volatile bool    localCcFollowing;
+  // extern volatile bool    localCcFollowing;
 
   // Called by the UI when the encoder is rotated while a LOCAL CC recording
   // session is active on the CC Edit page (overrides normal field navigation).

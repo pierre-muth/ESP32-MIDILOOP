@@ -301,6 +301,14 @@ void erasePointsAfter(uint8_t curveIdx, uint32_t tick) {
   xSemaphoreGive(mutex);
 }
 
+int16_t curvePointCount(uint8_t curveIdx) {
+    if (curveIdx >= CC_CURVE_COUNT) return 0;
+    if (xSemaphoreTake(mutex, portMAX_DELAY) != pdTRUE) return 0;
+    int16_t count = ccCurves[curveIdx].pointCount;
+    xSemaphoreGive(mutex);
+    return count;
+}
+
 uint8_t curveValueAt(uint8_t curveIdx, uint32_t positionTick) {
   if (curveIdx >= CC_CURVE_COUNT) return 0;
   const CcCurve &curve = ccCurves[curveIdx];

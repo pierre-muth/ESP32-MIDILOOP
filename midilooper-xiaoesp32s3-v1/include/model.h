@@ -41,9 +41,9 @@ enum class QuantMode : uint8_t { OFF, BEAT, HALF, QUARTER, EIGHTH, COUNT };
 struct Settings {
   uint8_t  bars             = 2;
   uint16_t bpm              = 120;
-  uint8_t  ccRateHz         = 50;
+  uint8_t  ccRateHz         = 30;
   uint8_t  outputChannel    = 1;   // 1..16
-  uint8_t  ccKnobSensitivity = 1;  // multiplies each encoder step for LOCAL CC input
+  uint8_t  ccKnobSensitivity = 2;  // multiplies each encoder step for LOCAL CC input
 };
 
 namespace Model {
@@ -114,6 +114,7 @@ namespace Model {
   // Removes every point strictly after `tick` (used when a LOCAL CC
   // recording starts overriding the curve from the playhead onward).
   void erasePointsAfter(uint8_t curveIdx, uint32_t tick);
+  int16_t curvePointCount(uint8_t curveIdx); // returns 0 if curveIdx is invalid
 
   // --- misc ----------------------------------------------------------------
   // Writes a short note name (e.g. "C#4") for the given MIDI pitch.

@@ -322,7 +322,7 @@ static void renderFrame() {
 
   if (page == Page::LOOPER) {
     drawBarBeatGrid();
-    for (uint8_t i = 0; i < CC_CURVE_COUNT; i++) drawCurve(curveSnapshot[i], false, 1, length);
+    for (uint8_t i = 0; i < CC_CURVE_COUNT; i++) drawCurve(curveSnapshot[i], false, 3, length);
     for (uint16_t i = 0; i < noteCountSnap; i++) drawNoteRect(noteSnapshot[i], length);
   } else if (page == Page::NOTE_EDIT) {
     drawBarBeatGrid();

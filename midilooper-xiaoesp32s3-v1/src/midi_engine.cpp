@@ -15,7 +15,7 @@ namespace MidiEngine {
 volatile bool    activeInputNote[128];
 volatile uint8_t lastCcInputValue[CC_CURVE_COUNT];
 volatile uint8_t localCcValue = 64;
-volatile bool    localCcFollowing = true;
+// volatile bool    localCcFollowing = true;
 
 static USBMIDI_Interface midi;
 
@@ -182,11 +182,10 @@ static void scheduleCc(uint32_t tick, uint64_t nowUs) {
   Channel ch = outputChannel();
   uint8_t curveIdx = Model::selectedCurve;
 
-  // Local "follow the curve" indicator while armed/recording but not yet
-  // overridden by encoder movement.
+  // Local "follow the curve" indicator if curve has points
   if (Transport::ccRecord == RecordState::RECORD && Transport::state == TransportState::RUNNING &&
-      Model::ccCurves[curveIdx].inputMode == CcInputMode::LOCAL && localCcFollowing) {
-    localCcValue = Model::curveValueAt(curveIdx, tick);
+      Model::ccCurves[curveIdx].inputMode == CcInputMode::LOCAL) {
+    if (Model::curvePointCount(curveIdx) != 0) localCcValue = Model::curveValueAt(curveIdx, tick);
   }
 
   // Immediate output of a freshly-overridden local value, independent of rate limiting.
@@ -307,16 +306,14 @@ void applyLocalCcDelta(int16_t delta) {
 
   if (Transport::state == TransportState::STOPPED &&
       (Transport::ccRecord == RecordState::ARMED || Transport::ccRecord == RecordState::ARMED_ONCE)) {
-    Transport::start(); // auto-transitions ccRecord to RECORD
-    localCcValue = Model::curveValueAt(curveIdx, 0);
-    localCcFollowing = true; // this call's delta is the first override below
+
+    int v = (int)localCcValue + delta * (int)Model::settings.ccKnobSensitivity;
+    localCcValue = (uint8_t)constrain(v, 0, 127);
+    localCcDirty = true;
   }
+
   if (Transport::ccRecord != RecordState::RECORD) return;
 
-  // The first override of a recording session erases any existing points
-  // ahead of the playhead, so only the new recording remains from here on.
-  if (localCcFollowing) Model::erasePointsAfter(curveIdx, Transport::currentTick());
-  localCcFollowing = false;
   int v = (int)localCcValue + delta * (int)Model::settings.ccKnobSensitivity;
   localCcValue = (uint8_t)constrain(v, 0, 127);
   localCcDirty = true;
@@ -325,8 +322,10 @@ void applyLocalCcDelta(int16_t delta) {
 
 void notifyCcRecordStarted() {
   uint8_t idx = Model::selectedCurve;
-  localCcFollowing = true;
-  localCcValue = Model::curveValueAt(idx, Transport::currentTick());
+  if (Model::curvePointCount(idx) != 0) localCcValue = Model::curveValueAt(idx, Transport::currentTick());
+  if (Transport::ccRecord == RecordState::RECORD)
+    Model::addOrUpdatePoint(idx, Transport::currentTick(), localCcValue);
+  
 }
 
 void requestNotePreview(uint8_t pitch, uint8_t velocity) {

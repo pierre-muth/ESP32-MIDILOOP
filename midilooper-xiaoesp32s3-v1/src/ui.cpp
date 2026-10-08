@@ -255,7 +255,7 @@ static const Field ccEditFields[] = {
   { FieldType::OPTION, cc_muteText,      cc_muteEncoder,       nullptr,        nullptr,          false },
   { FieldType::VALUE,  cc_numberText,    cc_numberEncoder,     nullptr,        nullptr,          false },
   { FieldType::LABEL,  cc_clearText,     nullptr,              cc_clearClick,  nullptr,          true },
-  { FieldType::LABEL,  cc_barsText,      nullptr,              nullptr,        nullptr,          false },
+  // { FieldType::LABEL,  cc_barsText,      nullptr,              nullptr,        nullptr,          false },
 };
 
 // ── Settings page ─────────────────────────────────────────────────────────────
