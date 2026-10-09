@@ -264,6 +264,7 @@ void addOrUpdatePoint(uint8_t curveIdx, uint32_t positionTick, uint8_t value) {
   CcCurve &curve = ccCurves[curveIdx];
 
   if (xSemaphoreTake(mutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+  // Update existing point if one exists at this positionTick.
   for (uint16_t i = 0; i < curve.pointCount; i++) {
     if (curve.points[i].positionTick == positionTick) {
       curve.points[i].value = value;
@@ -272,6 +273,7 @@ void addOrUpdatePoint(uint8_t curveIdx, uint32_t positionTick, uint8_t value) {
     }
   }
   if (curve.pointCount < MAX_CC_POINTS) {
+    // Insert new point in sorted order by positionTick.
     uint16_t at = curve.pointCount++;
     while (at > 0 && curve.points[at - 1].positionTick > positionTick) {
       curve.points[at] = curve.points[at - 1];
@@ -332,6 +334,34 @@ void noteName(uint8_t pitch, char *buf, size_t len) {
   static const char *names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
   int octave = (int)(pitch / 12) - 1;
   snprintf(buf, len, "%s%d", names[pitch % 12], octave);
+}
+
+// ── MIDI input log (Settings page monitor) ───────────────────────────────────
+// Ring buffer where midiLogHead points at the next free slot and midiLogCount
+// tracks the number of valid entries (oldest first in copyMidiLog).
+static MidiLogEntry midiLogBuf[MIDI_LOG_SIZE];
+static uint8_t  midiLogHead = 0;
+static uint16_t midiLogCount = 0;
+
+void logMidi(MidiLogType type, uint8_t channel, uint8_t data1, uint8_t data2) {
+  if (mutex == nullptr) return;
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(2)) != pdTRUE) return;
+  midiLogBuf[midiLogHead] = { millis(), type, channel, data1, data2 };
+  midiLogHead = (uint8_t)((midiLogHead + 1) % MIDI_LOG_SIZE);
+  if (midiLogCount < MIDI_LOG_SIZE) midiLogCount++;
+  xSemaphoreGive(mutex);
+}
+
+uint16_t copyMidiLog(MidiLogEntry *out, uint16_t maxEntries) {
+  uint16_t n = 0;
+  if (mutex == nullptr) return 0;
+  if (xSemaphoreTake(mutex, pdMS_TO_TICKS(4)) != pdTRUE) return 0;
+  n = midiLogCount < maxEntries ? midiLogCount : maxEntries;
+  uint16_t start = (midiLogHead + MIDI_LOG_SIZE - n) % MIDI_LOG_SIZE;
+  for (uint16_t i = 0; i < n; i++)
+    out[i] = midiLogBuf[(start + i) % MIDI_LOG_SIZE];
+  xSemaphoreGive(mutex);
+  return n;
 }
 
 void init() {

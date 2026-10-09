@@ -253,9 +253,9 @@ static void drawModeIcon(Page page, int16_t x, int16_t y, int16_t w, int16_t h, 
   }
 }
 
-// ── Buttons (left column, or full width on the Settings page) ───────────────
-static void buttonRect(uint8_t idx, uint8_t count, bool fullWidth, int16_t &x, int16_t &y, int16_t &w, int16_t &h) {
-  w = fullWidth ? DISPLAY_W : LEFT_COLUMN_W;
+// ── Buttons (left column on every page) ─────────────────────────────────────
+static void buttonRect(uint8_t idx, uint8_t count, int16_t &x, int16_t &y, int16_t &w, int16_t &h) {
+  w = LEFT_COLUMN_W;
   int16_t baseH = DISPLAY_H / count;
   x = 0;
   y = idx * baseH;
@@ -265,12 +265,11 @@ static void buttonRect(uint8_t idx, uint8_t count, bool fullWidth, int16_t &x, i
 static void drawButtons() {
   Page page = UI::currentPage();
   uint8_t count = UI::fieldCount();
-  bool fullWidth = (page == Page::SETTINGS);
   char text[24];
 
   for (uint8_t i = 0; i < count; i++) {
     int16_t x, y, w, h;
-    buttonRect(i, count, fullWidth, x, y, w, h);
+    buttonRect(i, count, x, y, w, h);
     const Field &f = UI::fieldAt(i);
     bool selected = (i == UI::focusIndex());
     bool editingThis = selected && UI::isEditing();
@@ -297,6 +296,56 @@ static void drawButtons() {
   }
 }
 
+// ── Settings page: incoming-MIDI monitor (right of the button column) ────────
+// Newest messages at the bottom; once the pane is full, older lines scroll up
+// and out of the top. Line height for text size 1.
+static const int16_t MON_X       = LEFT_COLUMN_W + 4;
+static const int16_t MON_TITLE_H = 12;    // header height
+static const int16_t MON_LINE_H  = 10;
+
+static void formatMidiEntry(const Model::MidiLogEntry &e, char *b, size_t n) {
+  char name[6], body[24];
+  switch (e.type) {
+    case Model::MidiLogType::NOTE_ON:
+      Model::noteName(e.data1, name, sizeof(name));
+      snprintf(body, sizeof(body), "ON  CH%2u %s V%u", e.channel, name, e.data2);
+      break;
+    case Model::MidiLogType::NOTE_OFF:
+      Model::noteName(e.data1, name, sizeof(name));
+      snprintf(body, sizeof(body), "OFF CH%2u %s V%u", e.channel, name, e.data2);
+      break;
+    case Model::MidiLogType::CC:
+      snprintf(body, sizeof(body), "CC  CH%2u %3u=%3u", e.channel, e.data1, e.data2);
+      break;
+    default:
+      snprintf(body, sizeof(body), "RAW CH%2u %3u %3u", e.channel, e.data1, e.data2);
+      break;
+  }
+  // Timestamp of reception (seconds.milliseconds), fixed width so all
+  // message columns line up regardless of uptime.
+  snprintf(b, n, "%7lu.%03lu %s", (unsigned long)(e.ms / 1000), (unsigned long)(e.ms % 1000), body);
+}
+
+static void drawMidiMonitor() {
+  display.setTextColor(COLOR_BLACK);
+  display.setTextSize(1);
+  display.setCursor(MON_X, 1);
+  display.print("MIDI IN");
+  display.drawFastHLine(LEFT_COLUMN_W, MON_TITLE_H - 3, DISPLAY_W - LEFT_COLUMN_W, COLOR_BLACK);
+
+  static Model::MidiLogEntry entries[MIDI_LOG_SIZE];
+  uint16_t count = Model::copyMidiLog(entries, MIDI_LOG_SIZE);
+
+  char text[40];
+  int16_t y = DISPLAY_H - MON_LINE_H;
+  display.setTextColor(COLOR_BLACK);
+  for (int16_t i = (int16_t)count - 1; i >= 0 && y >= MON_TITLE_H; i--, y -= MON_LINE_H) {
+    formatMidiEntry(entries[i], text, sizeof(text));
+    display.setCursor(MON_X, y);
+    display.print(text);
+  }
+}
+
 // ── Frame assembly ────────────────────────────────────────────────────────────
 static void renderFrame() {
   display.clearDisplayBuffer();
@@ -305,6 +354,7 @@ static void renderFrame() {
 
   if (page == Page::SETTINGS) {
     drawButtons();
+    drawMidiMonitor();
     display.refresh();
     return;
   }

@@ -102,9 +102,17 @@ static void handleCcIn(uint8_t ccNumber, uint8_t value) {
 struct EngineCallbacks : MIDI_Callbacks {
   void onChannelMessage(MIDI_Interface &, ChannelMessage msg) override {
     MIDIMessageType type = msg.getMessageType();
+    uint8_t channel = msg.getChannel().getOneBased();
     bool noteOnMsg = type == MIDIMessageType::NoteOn && msg.data2 > 0;
     bool noteOffMsg = type == MIDIMessageType::NoteOff ||
                       (type == MIDIMessageType::NoteOn && msg.data2 == 0);
+    // Log every incoming channel message for the Settings page MIDI monitor
+    // (before any routing, so unmatched messages show up too).
+    if (noteOnMsg)       Model::logMidi(Model::MidiLogType::NOTE_ON, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
+    else if (noteOffMsg) Model::logMidi(Model::MidiLogType::NOTE_OFF, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
+    else if (type == MIDIMessageType::ControlChange)
+                         Model::logMidi(Model::MidiLogType::CC, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
+    else                 Model::logMidi(Model::MidiLogType::OTHER, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
     if (noteOnMsg || noteOffMsg) {
       uint8_t pitch = msg.data1 & 0x7F;
       if (noteOnMsg) handleNoteOn(pitch, msg.data2 & 0x7F);
@@ -235,6 +243,14 @@ static void taskMidi(void *) {
   RecordState previousNoteRecord = RecordState::PLAY;
 
   for (;;) {
+    // Pace the poll loop: back-to-back spinning at priority 10 keeps core 0
+    // fully loaded, which measurably worsens rare DWC2 interrupt-latency
+    // races (USB input deferred until the next message arrives). 100 us is
+    // ~0.2 loop-tick at 120 BPM (1 tick = 500 us), far below the playback
+    // scheduling granularity, while cutting the poll rate by orders of
+    // magnitude.
+    delayMicroseconds(100);
+
     midi.update();
     servicePreview();
 
@@ -254,13 +270,12 @@ static void taskMidi(void *) {
       previousTransport = transport;
       previousNoteRecord = noteRecord;
       previousTick = 0;
-      taskYIELD();
       continue;
     }
 
     uint64_t nowUs = (uint64_t)esp_timer_get_time();
     uint32_t length = Model::loopLengthTicks();
-    if (length == 0) { taskYIELD(); continue; }
+    if (length == 0) { continue; }
 
     uint32_t tick = Transport::currentTick();
     bool justStarted = previousTransport != TransportState::RUNNING;
@@ -291,6 +306,7 @@ static void taskMidi(void *) {
     previousTick = tick;
     previousTransport = transport;
     previousNoteRecord = noteRecord;
+    
   }
 }
 

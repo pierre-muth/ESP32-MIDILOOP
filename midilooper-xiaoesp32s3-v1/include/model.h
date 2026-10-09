@@ -48,6 +48,18 @@ struct Settings {
 
 namespace Model {
 
+  // Kind of message stored in the incoming-MIDI log (Settings page monitor).
+  enum class MidiLogType : uint8_t { NOTE_ON, NOTE_OFF, CC, OTHER };
+
+  // One entry of the incoming-MIDI log.
+  struct MidiLogEntry {
+    uint32_t    ms;      // millis() timestamp of arrival
+    MidiLogType type;
+    uint8_t     channel; // 1..16 as received
+    uint8_t     data1;   // pitch / CC number / raw
+    uint8_t     data2;   // velocity / CC value / raw
+  };
+
   // Guards notes[]/noteCount and ccCurves[] against concurrent access from the
   // MIDI task (core 0) and the UI/display tasks (core 1).
   extern SemaphoreHandle_t mutex;
@@ -119,5 +131,14 @@ namespace Model {
   // --- misc ----------------------------------------------------------------
   // Writes a short note name (e.g. "C#4") for the given MIDI pitch.
   void noteName(uint8_t pitch, char *buf, size_t len);
+
+  // --- MIDI input log (Settings page monitor) ----------------------------
+  // Appends an incoming message to the mutex-guarded ring buffer. Silently
+  // drops the message if the mutex cannot be taken (better than blocking the
+  // high-priority MIDI task).
+  void logMidi(MidiLogType type, uint8_t channel, uint8_t data1, uint8_t data2);
+  // Copies the newest `maxEntries` entries into `out` in chronological order
+  // (oldest first). Returns how many entries were copied.
+  uint16_t copyMidiLog(MidiLogEntry *out, uint16_t maxEntries);
 
 } // namespace Model

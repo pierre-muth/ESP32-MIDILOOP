@@ -45,6 +45,9 @@ static const uint8_t  MAX_MIDI_CHANNEL = 16;
 static const uint8_t  MIN_CC_KNOB_SENS = 1;
 static const uint8_t  MAX_CC_KNOB_SENS = 10;
 
+// ── MIDI input monitor (Settings page) ───────────────────────────────────────
+static const uint8_t MIDI_LOG_SIZE = 64;
+
 // ── Display geometry (400x240 Sharp Memory LCD) ───────────────────────────────
 static const int16_t DISPLAY_W = 400;
 static const int16_t DISPLAY_H = 240;
