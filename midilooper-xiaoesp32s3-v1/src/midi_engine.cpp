@@ -245,14 +245,11 @@ static void taskMidi(void *) {
   for (;;) {
     // Pace the poll loop: back-to-back spinning at priority 10 keeps core 0
     // fully loaded, which measurably worsens rare DWC2 interrupt-latency
-    // races (USB input deferred until the next message arrives). 100 us is
-    // ~0.2 loop-tick at 120 BPM (1 tick = 500 us), far below the playback
-    // scheduling granularity, while cutting the poll rate by orders of
-    // magnitude.
-    delayMicroseconds(100);
+    // races (USB input deferred until the next message arrives). 
 
+    taskYIELD(); // yield to other tasks (e.g. display) to avoid starving them
+    vTaskDelay( pdMS_TO_TICKS(1) ); 
     midi.update();
-    servicePreview();
 
     TransportState transport = Transport::state;
     RecordState noteRecord = Transport::noteRecord;
@@ -298,6 +295,8 @@ static void taskMidi(void *) {
       }
     }
 
+    servicePreview();
+
     // `wrapped` also covers "just started": the playhead is at tick 0 either
     // way, so notes/CC starting at position 0 must be (re)triggered.
     scheduleNotes(tick, wrapped);
@@ -312,7 +311,7 @@ static void taskMidi(void *) {
 
 void start() {
   memset((void *)lastCcInputValue, 0, sizeof(lastCcInputValue));
-  xTaskCreatePinnedToCore(taskMidi, "midi", 8192, nullptr, 10, nullptr, 0);
+  xTaskCreatePinnedToCore(taskMidi, "midi", 32768, nullptr, 10, nullptr, 0);
 }
 
 void applyLocalCcDelta(int16_t delta) {
