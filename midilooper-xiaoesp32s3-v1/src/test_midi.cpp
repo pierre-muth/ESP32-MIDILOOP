@@ -20,12 +20,13 @@
 #include <USB.h>
 #include <USBMIDI.h>
 #include <esp_timer.h>
+#include <midi_diag.h>
 
 #define TEST_BAUD     115200
 #define TEST_RX_PIN   D5
 #define TEST_TX_PIN   D6
 #define MIDI_CH       1
-#define TX_PROBE_MS   2000   // TX probe period (0 disables the probe)
+#define TX_PROBE_MS   0   // TX probe period (0 disables the probe)
 #define TX_HOLD_MS    300
 
 USBMIDI midiRx;
@@ -66,6 +67,10 @@ void setup() {
   Serial1.begin(TEST_BAUD, SERIAL_8N1, TEST_RX_PIN, TEST_TX_PIN);
   Serial1.println("\n[test_midi] minimal USB MIDI RX test v2 booting...");
 
+#if MIDI_DIAG_ENABLED
+  Serial1.println("[test_midi] MIDI_DIAG=1: stack (DCD/USBD/class) events follow [diag] lines.");
+#endif
+
   midiRx.begin();
   USB.begin();
 
@@ -78,6 +83,28 @@ void setup() {
 
 void loop() {
   int64_t nowUs = esp_timer_get_time();
+
+#if MIDI_DIAG_ENABLED
+  // --- drain device-stack diagnostic ring, print from here (never in ISR) --
+  {
+    static midi_diag_evt_t evts[24];
+    static const char *K[] = {"?",     "DCD_ARM", "DCD_RXPKT", "DCD_DONE", "USBD_ISRQ", "USBD_DISP",
+                              "DROP",  "MIDI_CB", "MIDI_RX",   "MIDI_ARM", "STRM_BLK",  "STRM_CLAIM",
+                              "STRM_SHRINK", "STRM_ARM"};
+    static int64_t lastDiagT = 0;
+    uint32_t n = midi_diag_read(evts, 24);
+    // print only the RX path (OUT endpoints); re-arm/claim/block lines are
+    // exactly the interesting ones below the DCD
+    for (uint32_t i = 0; i < n; i++) {
+      const midi_diag_evt_t &e = evts[i];
+      if (e.kind >= sizeof(K) / sizeof(K[0])) continue;
+      Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u aux=%lu\r\n",
+                     (long long)(e.t - lastDiagT), K[e.kind], e.ep,
+                     (unsigned)e.len, (unsigned long)e.aux);
+      lastDiagT = e.t;
+    }
+  }
+#endif
 
   // --- USB mount transitions (edge-detected every loop pass) --------------
   bool mounted = tud_mounted();

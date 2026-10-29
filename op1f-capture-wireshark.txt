@@ -1,0 +1,175 @@
+
+No.     Time           Source                Destination           Protocol Length Info
+   2506 13.067664      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2506: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 93357f
+
+No.     Time           Source                Destination           Protocol Length Info
+   2507 13.067844      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2507: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 93377f
+
+No.     Time           Source                Destination           Protocol Length Info
+   2508 13.067873      2.7.7                 host                  USBAUDIO 35     USB-MIDI Event Packets
+
+Frame 2508: Packet, 35 bytes on wire (280 bits), 35 bytes captured (280 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 93397f
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 933b7f
+
+No.     Time           Source                Destination           Protocol Length Info
+   2509 13.067886      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2509: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2510 13.067900      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2510: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 933c7f
+
+No.     Time           Source                Destination           Protocol Length Info
+   2511 13.067935      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2511: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2512 13.067943      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2512: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2513 13.067949      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2513: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2514 13.192263      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2514: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 833500
+
+No.     Time           Source                Destination           Protocol Length Info
+   2515 13.192335      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2515: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2516 13.192355      2.7.7                 host                  USBAUDIO 39     USB-MIDI Event Packets
+
+Frame 2516: Packet, 39 bytes on wire (312 bits), 39 bytes captured (312 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 833700
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 833900
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 833b00
+
+No.     Time           Source                Destination           Protocol Length Info
+   2517 13.192382      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2517: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 833c00
+
+No.     Time           Source                Destination           Protocol Length Info
+   2518 13.192461      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2518: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2519 13.192483      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2519: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2520 13.545934      2.2.1                 host                  USB      27     URB_BULK in
+
+Frame 2520: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2521 14.068120      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2521: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-on
+    0000 .... = Cable Number: 0x0
+    .... 1001 = Code Index: Note-on (0x9)
+    MIDI Event: 93297f
+
+No.     Time           Source                Destination           Protocol Length Info
+   2522 14.068318      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2522: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2523 14.192110      2.7.7                 host                  USBAUDIO 31     USB-MIDI Event Packets
+
+Frame 2523: Packet, 31 bytes on wire (248 bits), 31 bytes captured (248 bits) on interface \\.\USBPcap2, id 0
+USB URB
+USB Midi Event Packet: Note-off
+    0000 .... = Cable Number: 0x0
+    .... 1000 = Code Index: Note-off (0x8)
+    MIDI Event: 832900
+
+No.     Time           Source                Destination           Protocol Length Info
+   2524 14.192229      host                  2.7.7                 USB      27     URB_BULK in
+
+Frame 2524: Packet, 27 bytes on wire (216 bits), 27 bytes captured (216 bits) on interface \\.\USBPcap2, id 0
+USB URB
+
+No.     Time           Source                Destination           Protocol Length Info
+   2525 16.094437      host                  2.7.0                 USB      36     SET INTERFACE Request
+
+Frame 2525: Packet, 36 bytes on wire (288 bits), 36 bytes captured (288 bits) on interface \\.\USBPcap2, id 0
+USB URB
+Setup Data
+
+No.     Time           Source                Destination           Protocol Length Info
+   2526 16.095265      2.7.0                 host                  USB      28     SET INTERFACE Response
+
+Frame 2526: Packet, 28 bytes on wire (224 bits), 28 bytes captured (224 bits) on interface \\.\USBPcap2, id 0
+USB URB

@@ -1,0 +1,20 @@
+{
+  "name": "TinyUSB-Instrumented",
+  "version": "0.0.1",
+  "description": "Diagnostic rebuild of the framework's prebuilt TinyUSB device stack (dcd_dwc2.c, usbd.c, tusb.c, midi_device.c at espressif/tinyusb 88c7f0b81). Logging is inert unless -DMIDI_DIAG=1 is set.",
+  "frameworks": "arduino",
+  "platforms": ["espressif32"],
+  "build": {
+    "includeDir": "include",
+    "srcDir": "src",
+    "flags": [
+      "-DCFG_TUSB_MCU=OPT_MCU_ESP32S3",
+      "-DCFG_TUSB_DEBUG=0",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/include",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/device",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/class/midi",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/portable/synopsys/dwc2"
+    ]
+  }
+}
