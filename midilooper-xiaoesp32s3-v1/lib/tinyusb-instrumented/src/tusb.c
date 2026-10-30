@@ -341,6 +341,21 @@ static bool stream_claim(tu_edpt_stream_t *s) {
 }
 
 static bool stream_xfer(tu_edpt_stream_t *s, uint16_t count) {
+  #if MIDI_DIAG_ENABLED
+  // Point 1: the layer that submits the OUT receive request, immediately
+  // before the usbd call that reaches dcd_edpt_xfer()/dcd_edpt_xfer_fifo().
+  // The request id is allocated here for OUT endpoints on this stream and
+  // carried through the synchronous call chain (same).
+  uint32_t req_id = 0;
+  if (!s->is_host && tu_edpt_dir(s->ep_addr) == TUSB_DIR_OUT) {
+    req_id = (tu_edpt_number(s->ep_addr) == 4) ? midi_diag_req_begin() : 0;
+    if (req_id) {
+      midi_diag_log(DIAG_REARM_REQ, count, s->ep_addr, req_id);
+    }
+  }
+  #else
+  const uint32_t req_id = 0; (void) req_id;
+  #endif
   if (s->is_host) {
     #if CFG_TUH_ENABLED
     return usbh_edpt_xfer(s->hwid, s->ep_addr, count ? s->ep_buf : NULL, count);
@@ -426,6 +441,9 @@ uint32_t tu_edpt_stream_write_available(tu_edpt_stream_t *s) {
 //--------------------------------------------------------------------+
 uint32_t tu_edpt_stream_read_xfer(tu_edpt_stream_t *s) {
   uint16_t available = tu_fifo_remaining(&s->ff);
+  #if MIDI_DIAG_ENABLED
+  static uint32_t claim_fail_run = 0;
+  #endif
 
   // Prepare for incoming data but only allow what we can store in the ring buffer.
   // TODO Actually we can still carry out the transfer, keeping count of received bytes
@@ -436,9 +454,19 @@ uint32_t tu_edpt_stream_read_xfer(tu_edpt_stream_t *s) {
   }
   TU_VERIFY(available >= s->mps);
   if (!stream_claim(s)) {
-    midi_diag_log(DIAG_STREAM_CLAIM, 0, s->ep_addr, available);
+    #if MIDI_DIAG_ENABLED
+    // Edge-triggered logging: the common case is every app poll failing while
+    // the earlier request is still in flight. Log only the first failure of a
+    // run to keep this event out of every diagnostic line.
+    if (claim_fail_run++ == 0) {
+      midi_diag_log(DIAG_STREAM_CLAIM, 0, s->ep_addr, available);
+    }
+    #endif
     return 0;
   }
+  #if MIDI_DIAG_ENABLED
+  claim_fail_run = 0;
+  #endif
   available = tu_fifo_remaining(&s->ff); // re-get available since fifo can be changed
 
   if (available >= s->mps) {

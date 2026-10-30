@@ -22,6 +22,11 @@ static midi_diag_ep4_evt_t md_ep4_ring[MD_EP4_RING];
 static volatile uint32_t md_ep4_wr = 0;
 static volatile uint32_t md_ep4_rd = 0;
 
+// Re-arm request correlation: a request id is allocated by the layer that
+// submits the OUT receive request and is cited by every later event of the
+// same synchronous call chain (class -> stream -> usbd -> dcd).
+static volatile uint32_t md_req_id = 0;
+
 void midi_diag_log(uint32_t kind, uint32_t len, uint32_t ep, uint32_t aux) {
   portENTER_CRITICAL_SAFE(&md_mux);
   midi_diag_evt_t *e = &md_ring[md_wr & MD_MASK];
@@ -94,6 +99,18 @@ uint32_t midi_diag_ep4_read(midi_diag_ep4_evt_t *out, uint32_t max) {
 
 uint32_t midi_diag_ep4_pending(void) {
   return md_ep4_wr - md_ep4_rd;
+}
+
+uint32_t midi_diag_req_begin(void) {
+  portENTER_CRITICAL(&md_mux);
+  md_req_id++;
+  const uint32_t id = md_req_id;
+  portEXIT_CRITICAL(&md_mux);
+  return id;
+}
+
+uint32_t midi_diag_req_current(void) {
+  return md_req_id;
 }
 
 #endif // MIDI_DIAG_ENABLED

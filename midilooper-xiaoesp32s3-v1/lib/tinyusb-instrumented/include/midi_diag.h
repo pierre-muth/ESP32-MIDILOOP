@@ -46,6 +46,10 @@ enum {
   DIAG_DCD_OEP       = 16, // DCD OUT endpoint interrupt
   DIAG_DCD_RXSTS     = 17, // DCD RX status FIFO entry
   DIAG_DCD_RXDATA    = 18, // DWC2 RX_DATA transaction popped off the RxFIFO (lowest reception point): len=wire byte_count ep=epnum aux=dpid|(frame<<4) p0/p1=first 8 payload bytes as landed in the RX stream FIFO
+  DIAG_REARM_REQ     = 19, // class/stream submits the OUT receive request: len=count ep=ep_addr aux=request id (allocated here)
+  DIAG_DCD_ENTER     = 20, // dcd_edpt_xfer()/dcd_edpt_xfer_fifo() entered, before any synchronization: len=total_bytes ep=ep_addr aux=request id
+  DIAG_DCD_LOCKED    = 21, // usbd_spin_lock() acquired: ep=ep_addr aux=request id
+  DIAG_DCD_ENABLED   = 22, // edpt_schedule_packets() programmed+enabled the OUT endpoint: ep=epnum aux=request id p0=DOEPCTL read-back (USBActEP check)
 };
 
 // Captured diagnostic event. len/ep/aux interpretation depends on kind.
@@ -65,9 +69,18 @@ typedef struct {
 // the controller left them at that instant. Fixed 64-entry RAM ring, written
 // only from the RXFLVL interrupt, drained in chronological (oldest first)
 // order from any task context.
+// `type` field of midi_diag_ep4_evt_t carries the raw GRXSTSP packet-status
+// code (bits 20:17 of the popped word), i.e. the GRXSTS_PKTSTS_* numbering.
+// Values mirror dwc2_type.h; the printer decodes from bits 20:17 and labels
+// every code, unknown/unhandled included.
 enum {
-  MIDI_DIAG_EP4_RXDATA     = 1,  // GRXSTS_PKTSTS_RX_DATA
-  MIDI_DIAG_EP4_RXCOMPLETE = 2,  // GRXSTS_PKTSTS_RX_COMPLETE
+  MIDI_DIAG_EP4_STS_GLOBAL_OUT_NAK = 1, // GRXSTS_PKTSTS_GLOBAL_OUT_NAK
+  MIDI_DIAG_EP4_STS_RX_DATA        = 2, // GRXSTS_PKTSTS_RX_DATA
+  MIDI_DIAG_EP4_STS_RX_COMPLETE    = 3, // GRXSTS_PKTSTS_RX_COMPLETE
+  MIDI_DIAG_EP4_STS_SETUP_DONE     = 4, // GRXSTS_PKTSTS_SETUP_DONE
+  MIDI_DIAG_EP4_STS_DTOG_ERR       = 5, // GRXSTS_PKTSTS_HOST_DATATOGGLE_ERR
+  MIDI_DIAG_EP4_STS_SETUP_RX       = 6, // GRXSTS_PKTSTS_SETUP_RX
+  MIDI_DIAG_EP4_STS_CH_HALTED      = 7, // GRXSTS_PKTSTS_HOST_CHANNEL_HALTED
 };
 
 typedef struct {
@@ -76,7 +89,7 @@ typedef struct {
   uint32_t doepctl;   // epout->doepctl at the event
   uint32_t doeptsiz;  // epout->doeptsiz at the event
   uint32_t doepint;   // epout->doepint at the event (pre-clear for RX_COMPLETE)
-  uint16_t type;      // MIDI_DIAG_EP4_RXDATA / MIDI_DIAG_EP4_RXCOMPLETE
+  uint16_t type;      // raw GRXSTSP packet status (bits 20:17); see MIDI_DIAG_EP4_STS_*
   uint16_t pad;
 } midi_diag_ep4_evt_t;
 
@@ -109,6 +122,12 @@ uint32_t midi_diag_ep4_read(midi_diag_ep4_evt_t *out, uint32_t max);
 // only the latest 64 are retained).
 uint32_t midi_diag_ep4_pending(void);
 
+// Request-id correlation for re-arm timing: begin() allocates a new id for
+// the EP4 OUT re-arm call chain; current() returns the last allocated id so
+// later events on the same chain (DCD entry, locked, enabled) can cite it.
+uint32_t midi_diag_req_begin(void);
+uint32_t midi_diag_req_current(void);
+
 #else
 
 #define midi_diag_log(...) ((void)0)          // arguments not evaluated
@@ -118,6 +137,8 @@ uint32_t midi_diag_ep4_pending(void);
 #define midi_diag_ep4_record(...) ((void)0)
 #define midi_diag_ep4_read(...) ((uint32_t)0)
 #define midi_diag_ep4_pending() ((uint32_t)0)
+#define midi_diag_req_begin() ((uint32_t)0)
+#define midi_diag_req_current() ((uint32_t)0)
 
 #endif
 

@@ -722,8 +722,28 @@ bool dcd_edpt_xfer_fifo(uint8_t rhport, uint8_t ep_addr, tu_fifo_t* ff, uint16_t
   uint8_t const dir = tu_edpt_dir(ep_addr);
   xfer_ctl_t* xfer = XFER_CTL_BASE(epnum, dir);
   bool ret;
+  #if MIDI_DIAG_ENABLED
+  bool diag_arm = false;
+  #endif
+
+  #if MIDI_DIAG_ENABLED
+  // Point 2: DCD entry, before any synchronization (cannot log inside the IRQ
+  // lock; captured before usbd_spin_lock below)
+  if (epnum == 4 && dir == TUSB_DIR_OUT) {
+    midi_diag_log(DIAG_DCD_ENTER, total_bytes, ep_addr, midi_diag_req_current());
+    diag_arm = true;
+  }
+  #endif
 
   usbd_spin_lock(is_isr);
+
+  #if MIDI_DIAG_ENABLED
+  // Point 3: spinlock acquired (portENTER_CRITICAL on ESP32-S3 SMP). Also
+  // confirms the path really uses the spinlock; no other sync exists.
+  if (diag_arm) {
+    midi_diag_log(DIAG_DCD_LOCKED, 0, ep_addr, midi_diag_req_current());
+  }
+  #endif
 
   if (xfer->max_size == 0) {
     ret = false;  // Endpoint is closed
@@ -736,6 +756,17 @@ bool dcd_edpt_xfer_fifo(uint8_t rhport, uint8_t ep_addr, tu_fifo_t* ff, uint16_t
     // Schedule packets to be sent within interrupt
     // TODO xfer fifo may only available for slave mode
     edpt_schedule_packets(rhport, epnum, dir);
+
+    #if MIDI_DIAG_ENABLED
+    // Point 4: endpoint programmed and enabled; confirm enable state from
+    // DOEPCTL read-back (single register read after the write)
+    if (diag_arm) {
+      midi_diag_log_payload(DIAG_DCD_ENABLED, 0, epnum,
+                            midi_diag_req_current(),
+                            DWC2_REG(rhport)->epout[epnum].doepctl, 0);
+    }
+    #endif
+
     ret = true;
   }
 
@@ -991,7 +1022,7 @@ static void handle_rxflvl_irq(uint8_t rhport) {
       #if MIDI_DIAG_ENABLED
       // Raw EP4 ring: endpoint registers as the controller left them at arrival
       if (epnum == 4) {
-        midi_diag_ep4_record(MIDI_DIAG_EP4_RXDATA, grxstsp_raw,
+        midi_diag_ep4_record(grxstsp.packet_status, grxstsp_raw,
                              epout->doepctl, epout->doeptsiz, epout->doepint);
       }
       #endif
@@ -1063,7 +1094,7 @@ static void handle_rxflvl_irq(uint8_t rhport) {
       #if MIDI_DIAG_ENABLED
       // Raw EP4 ring: XFRC was just cleared, capture the interrupt word as received
       if (epnum == 4) {
-        midi_diag_ep4_record(MIDI_DIAG_EP4_RXCOMPLETE, grxstsp_raw,
+        midi_diag_ep4_record(grxstsp.packet_status, grxstsp_raw,
                              epout->doepctl, epout->doeptsiz,
                              doepint | DOEPINT_XFRC);
       }

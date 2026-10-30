@@ -22,7 +22,7 @@
 #include <esp_timer.h>
 #include <midi_diag.h>
 
-#define TEST_BAUD     115200
+#define TEST_BAUD     921600   // fast diag printing (was 115200; byte time 10.85us)
 #define TEST_RX_PIN   D5
 #define TEST_TX_PIN   D6
 #define MIDI_CH       1
@@ -91,15 +91,28 @@ void loop() {
     static const char *K[] = {"?",     "DCD_ARM", "DCD_RXPKT", "DCD_DONE", "USBD_ISRQ", "USBD_DISP",
                               "DROP",  "MIDI_CB", "MIDI_RX",   "MIDI_ARM", "STRM_BLK",  "STRM_CLAIM",
                               "STRM_SHRINK", "STRM_ARM", "DCD_OUT_REGS", "DCD_IRQ", "DCD_OEP", "DCD_RXSTS",
-                              "DCD_RXDATA"};
+                              "DCD_RXDATA", "REARM_REQ", "DCD_ENTER", "DCD_LOCKED", "DCD_ENABLED"};
     static int64_t lastDiagT = 0;
     uint32_t n = midi_diag_read(evts, 24);
-    // print only the RX path (OUT endpoints); re-arm/claim/block lines are
-    // exactly the interesting ones below the DCD
+    // MIDI_CB / MIDI_RX / STRM_BLK / MIDI_ARM collapse into ONE compact line
+    // per drain: they always fire as a fixed quartet per received burst and
+    // their per-line print time was filling the re-arm window.
+    uint32_t burstCb = 0, burstRxBytes = 0, burstArm = 0;
+    int64_t burstFirstT = 0, burstLastT = 0;
+    uint32_t burstFifo = 0;
     for (uint32_t i = 0; i < n; i++) {
       const midi_diag_evt_t &e = evts[i];
       if (e.kind >= sizeof(K) / sizeof(K[0])) continue;
-      
+
+      if (e.kind == DIAG_MIDI_CB || e.kind == DIAG_MIDI_RX ||
+          e.kind == DIAG_MIDI_ARM || e.kind == DIAG_STREAM_BLOCK) {
+        if (e.kind == DIAG_MIDI_CB)   { burstCb++;        burstFirstT = e.t; }
+        if (e.kind == DIAG_MIDI_RX)   { burstRxBytes += e.len; }
+        if (e.kind == DIAG_MIDI_ARM)  { burstArm = (e.len == 0) ? 1 : 0; burstFifo = e.aux; }
+        burstLastT = e.t;
+        continue;
+      }
+
       if (e.kind == DIAG_DCD_IRQ){
         Serial1.printf("[diag] +%-8lldus %-12s gintsts_raw=%08X gintsts=%08X daint=%08X\r\n",
                        (long long)(e.t - lastDiagT), K[e.kind], 
@@ -139,6 +152,20 @@ void loop() {
                        (unsigned)e.len, (unsigned)raw, pktsts, dpid, frame,
                        b0, b1, b2, b3, b4, b5, b6, b7);
       }
+      else if (e.kind == DIAG_DCD_ENABLED) {
+        // endpoint programmed & enabled; p0 = DOEPCTL read-back
+        const uint8_t en = (uint8_t)((e.p0 >> 15) & 0x01); // DOEPCTL.USBActEP
+        Serial1.printf("[diag] +%-8lldus %-12s ep=%02X req=%-5lu ctl=%08X (USBActEP=%u)\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind],
+                       (unsigned)e.ep, (unsigned long)e.aux,
+                       (unsigned)e.p0, en);
+      }
+      else if (e.kind == DIAG_REARM_REQ || e.kind == DIAG_DCD_ENTER || e.kind == DIAG_DCD_LOCKED) {
+        // re-arm timing chain; aux = request id
+        Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u req=%lu\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind],
+                       (unsigned)e.ep, (unsigned)e.len, (unsigned long)e.aux);
+      }
       else 
       {
         Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u aux=%lu\r\n",
@@ -148,10 +175,21 @@ void loop() {
       
       lastDiagT = e.t;
     }
+    if (burstCb > 0) {
+      // compact burst line: base timestamp = MIDI_CB time is already carried
+      // by lastDiagT (print the complete quartet delta-span instead of 4 lines)
+      Serial1.printf("[diag] BURST ep=04 rxbytes=%-3u armblocked=%u fifo=%u span=%lldus\r\n",
+                     burstRxBytes, burstArm, burstFifo,
+                     (long long)(burstLastT - burstFirstT));
+      lastDiagT = burstLastT;
+    }
 
     // Drain the raw EP4 receive-event ring (oldest first) and print it.
     static midi_diag_ep4_evt_t ep4[16];
-    static const char *T[] = {"RX_DATA", "RX_COMPLETE"};
+    static const char *T[] = {
+      "?", "GLOBAL_OUT_NAK", "RX_DATA", "RX_COMPLETE", "SETUP_DONE",
+      "DTOG_ERR", "SETUP_RX", "CH_HALTED", "?"
+    };
     static int64_t lastEp4T = 0;
     uint32_t ne = midi_diag_ep4_read(ep4, 16);
     if (ne > 0 && midi_diag_ep4_pending() > ne) {
@@ -160,11 +198,16 @@ void loop() {
     }
     for (uint32_t i = 0; i < ne; i++) {
       const midi_diag_ep4_evt_t &v = ep4[i];
-      const char *tn = (v.type < sizeof(T) / sizeof(T[0])) ? T[v.type] : "?";
-      Serial1.printf("[diag] +%-8lldus EP4 %-11s grxstsp=%08X ctl=%08X tsiz=%08X int=%08X\r\n",
+      // decode packet status from GRXSTSP bits 20:17 (access via the raw word
+      // so multi-bit fields like EP num in bits 3:0 are never misread)
+      const uint8_t sts = (uint8_t)((v.grxstsp >> 17) & 0x0F);
+      const char *tn = (sts < sizeof(T) / sizeof(T[0])) ? T[sts] : "?";
+      const uint8_t epno = (uint8_t)(v.grxstsp & 0x0F);
+      const uint16_t bcnt = (uint16_t)((v.grxstsp >> 4) & 0x7FF);
+      Serial1.printf("[diag] +%-8lldus EP4 %-14s grxstsp=%08X ep=%u bcnt=%u ctl=%08X tsiz=%08X int=%08X\r\n",
                      (long long)(v.t - lastEp4T), tn,
-                     (unsigned)v.grxstsp, (unsigned)v.doepctl,
-                     (unsigned)v.doeptsiz, (unsigned)v.doepint);
+                     (unsigned)v.grxstsp, epno, bcnt,
+                     (unsigned)v.doepctl, (unsigned)v.doeptsiz, (unsigned)v.doepint);
       lastEp4T = v.t;
     }
   }
