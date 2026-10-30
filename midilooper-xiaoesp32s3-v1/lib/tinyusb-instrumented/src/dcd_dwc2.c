@@ -940,6 +940,9 @@ static void handle_rxflvl_irq(uint8_t rhport) {
 
   // Pop control word off FIFO
   const dwc2_grxstsp_t grxstsp = {.value = dwc2->grxstsp};
+  #if MIDI_DIAG_ENABLED
+  const uint32_t grxstsp_raw = grxstsp.value; // single GRXSTSP read: re-reading would pop another status entry
+  #endif
   const uint8_t packet_status = grxstsp.packet_status;
   const uint8_t epnum = grxstsp.ep_ch_num;
   const uint8_t byte_count = grxstsp.byte_count;
@@ -985,6 +988,26 @@ static void handle_rxflvl_irq(uint8_t rhport) {
       const uint16_t byte_count = grxstsp.byte_count;
       xfer_ctl_t* xfer = XFER_CTL_BASE(epnum, TUSB_DIR_OUT);
 
+      #if MIDI_DIAG_ENABLED
+      // Raw EP4 ring: endpoint registers as the controller left them at arrival
+      if (epnum == 4) {
+        midi_diag_ep4_record(MIDI_DIAG_EP4_RXDATA, grxstsp_raw,
+                             epout->doepctl, epout->doeptsiz, epout->doepint);
+      }
+      #endif
+
+      #if MIDI_DIAG_ENABLED
+      // Wire-payload capture: latch the stream FIFO write position BEFORE the
+      // payload is popped from the RxFIFO, then read the landed bytes back.
+      // Only this IRQ writes the RX FIFO while RXFLVL is masked, so (start,len)
+      // identify exactly the bytes of this USB transaction. The application
+      // could drain them in between, but reads never alter buffer contents
+      // ahead of wr_idx, so the snapshot stays valid.
+      tu_fifo_t *const cap_ff = xfer->ff;
+      const uint16_t cap_start = (cap_ff != NULL) ? (uint16_t)(cap_ff->wr_idx % cap_ff->depth) : 0;
+      const uint16_t cap_len = (cap_ff != NULL) ? (uint16_t)(byte_count < 8 ? byte_count : 8) : 0;
+      #endif
+
       if (byte_count != 0) {
         // Read packet off RxFIFO
         if (xfer->ff != NULL) {
@@ -994,6 +1017,22 @@ static void handle_rxflvl_irq(uint8_t rhport) {
           xfer->buffer += byte_count;
         }
       }
+
+      #if MIDI_DIAG_ENABLED
+      if (cap_ff != NULL) {
+        uint8_t wire[8] = {0};
+        for (uint16_t i = 0; i < cap_len; i++) {
+          wire[i] = cap_ff->buffer[(uint16_t)((cap_start + i) % cap_ff->depth)];
+        }
+        uint32_t p0 = (uint32_t) wire[0] | ((uint32_t) wire[1] << 8) |
+                      ((uint32_t) wire[2] << 16) | ((uint32_t) wire[3] << 24);
+        uint32_t p1 = (uint32_t) wire[4] | ((uint32_t) wire[5] << 8) |
+                      ((uint32_t) wire[6] << 16) | ((uint32_t) wire[7] << 24);
+        midi_diag_log_payload(DIAG_DCD_RXDATA, byte_count, epnum,
+                              grxstsp_raw,
+                              p0, p1);
+      }
+      #endif
 
       // short packet (including ZLP when byte_count == 0), minus remaining bytes (xfer_size)
       if (byte_count < xfer->max_size) {
@@ -1020,6 +1059,15 @@ static void handle_rxflvl_irq(uint8_t rhport) {
           break;
         }
       }
+
+      #if MIDI_DIAG_ENABLED
+      // Raw EP4 ring: XFRC was just cleared, capture the interrupt word as received
+      if (epnum == 4) {
+        midi_diag_ep4_record(MIDI_DIAG_EP4_RXCOMPLETE, grxstsp_raw,
+                             epout->doepctl, epout->doeptsiz,
+                             doepint | DOEPINT_XFRC);
+      }
+      #endif
 
       xfer_ctl_t* xfer = XFER_CTL_BASE(epnum, TUSB_DIR_OUT);
       if (epnum == 0 && _dcd_data.ep0_pending[TUSB_DIR_OUT] > 0) {

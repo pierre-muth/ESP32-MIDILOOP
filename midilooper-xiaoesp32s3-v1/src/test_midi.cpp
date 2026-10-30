@@ -90,7 +90,8 @@ void loop() {
     static midi_diag_evt_t evts[24];
     static const char *K[] = {"?",     "DCD_ARM", "DCD_RXPKT", "DCD_DONE", "USBD_ISRQ", "USBD_DISP",
                               "DROP",  "MIDI_CB", "MIDI_RX",   "MIDI_ARM", "STRM_BLK",  "STRM_CLAIM",
-                              "STRM_SHRINK", "STRM_ARM", "DCD_OUT_REGS", "DCD_IRQ", "DCD_OEP", "DCD_RXSTS"};
+                              "STRM_SHRINK", "STRM_ARM", "DCD_OUT_REGS", "DCD_IRQ", "DCD_OEP", "DCD_RXSTS",
+                              "DCD_RXDATA"};
     static int64_t lastDiagT = 0;
     uint32_t n = midi_diag_read(evts, 24);
     // print only the RX path (OUT endpoints); re-arm/claim/block lines are
@@ -122,6 +123,22 @@ void loop() {
                        (long long)(e.t - lastDiagT), K[e.kind], 
                        (unsigned)e.len, (unsigned)e.ep, (unsigned)e.aux);
       }
+      else if (e.kind == DIAG_DCD_RXDATA) {
+        // lowest reception point: raw USB transaction off the DWC2 RxFIFO;
+        // aux now carries the raw GRXSTSP word
+        const uint32_t raw = e.aux;
+        const uint8_t  pktsts = (uint8_t)((raw >> 17) & 0x0F);
+        const uint8_t  dpid  = (uint8_t)((raw >> 15) & 0x03);
+        const uint8_t  frame = (uint8_t)((raw >> 21) & 0x0F);
+        const uint8_t b0 = (uint8_t)(e.p0 & 0xFF), b1 = (uint8_t)((e.p0 >> 8) & 0xFF),
+                      b2 = (uint8_t)((e.p0 >> 16) & 0xFF), b3 = (uint8_t)((e.p0 >> 24) & 0xFF);
+        const uint8_t b4 = (uint8_t)(e.p1 & 0xFF), b5 = (uint8_t)((e.p1 >> 8) & 0xFF),
+                      b6 = (uint8_t)((e.p1 >> 16) & 0xFF), b7 = (uint8_t)((e.p1 >> 24) & 0xFF);
+        Serial1.printf("[diag] +%-8lldus %-12s ep=%02X wirelen=%-3u raw=%08X sts=%02X dpid=%u frame=%u data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind], (unsigned)e.ep,
+                       (unsigned)e.len, (unsigned)raw, pktsts, dpid, frame,
+                       b0, b1, b2, b3, b4, b5, b6, b7);
+      }
       else 
       {
         Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u aux=%lu\r\n",
@@ -130,6 +147,25 @@ void loop() {
       }
       
       lastDiagT = e.t;
+    }
+
+    // Drain the raw EP4 receive-event ring (oldest first) and print it.
+    static midi_diag_ep4_evt_t ep4[16];
+    static const char *T[] = {"RX_DATA", "RX_COMPLETE"};
+    static int64_t lastEp4T = 0;
+    uint32_t ne = midi_diag_ep4_read(ep4, 16);
+    if (ne > 0 && midi_diag_ep4_pending() > ne) {
+      Serial1.printf("[diag] EP4 ring overflow: %lu events pending, oldest lost\r\n",
+                     (unsigned long)midi_diag_ep4_pending());
+    }
+    for (uint32_t i = 0; i < ne; i++) {
+      const midi_diag_ep4_evt_t &v = ep4[i];
+      const char *tn = (v.type < sizeof(T) / sizeof(T[0])) ? T[v.type] : "?";
+      Serial1.printf("[diag] +%-8lldus EP4 %-11s grxstsp=%08X ctl=%08X tsiz=%08X int=%08X\r\n",
+                     (long long)(v.t - lastEp4T), tn,
+                     (unsigned)v.grxstsp, (unsigned)v.doepctl,
+                     (unsigned)v.doeptsiz, (unsigned)v.doepint);
+      lastEp4T = v.t;
     }
   }
 #endif

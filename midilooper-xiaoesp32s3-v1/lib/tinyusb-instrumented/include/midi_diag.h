@@ -45,22 +45,49 @@ enum {
   DIAG_DCD_IRQ       = 15, // DCD interrupt handler entered
   DIAG_DCD_OEP       = 16, // DCD OUT endpoint interrupt
   DIAG_DCD_RXSTS     = 17, // DCD RX status FIFO entry
+  DIAG_DCD_RXDATA    = 18, // DWC2 RX_DATA transaction popped off the RxFIFO (lowest reception point): len=wire byte_count ep=epnum aux=dpid|(frame<<4) p0/p1=first 8 payload bytes as landed in the RX stream FIFO
 };
 
 // Captured diagnostic event. len/ep/aux interpretation depends on kind.
+// p0/p1 carry up to 8 payload bytes (used by DIAG_DCD_RXDATA).
 typedef struct {
   int64_t  t;    // esp_timer_get_time() in microseconds (single common time base)
-  uint32_t aux;  
+  uint32_t aux;
   uint32_t kind;
   uint32_t len;
   uint32_t ep;   // full endpoint address (dir bit included where applicable)
-  uint32_t pad;
+  uint32_t p0;   // payload bytes 0..3 (LSB first)
+  uint32_t p1;   // payload bytes 4..7 (LSB first), 0 if fewer than 5 bytes
 } midi_diag_evt_t;
+
+// Raw EP4 (bulk OUT) receive-event ring: one entry per RXFLVL RX_DATA or
+// RX_COMPLETE status word for endpoint 4, with the OUT endpoint registers as
+// the controller left them at that instant. Fixed 64-entry RAM ring, written
+// only from the RXFLVL interrupt, drained in chronological (oldest first)
+// order from any task context.
+enum {
+  MIDI_DIAG_EP4_RXDATA     = 1,  // GRXSTS_PKTSTS_RX_DATA
+  MIDI_DIAG_EP4_RXCOMPLETE = 2,  // GRXSTS_PKTSTS_RX_COMPLETE
+};
+
+typedef struct {
+  int64_t  t;         // esp_timer_get_time() in microseconds
+  uint32_t grxstsp;   // raw GRXSTSP value as popped
+  uint32_t doepctl;   // epout->doepctl at the event
+  uint32_t doeptsiz;  // epout->doeptsiz at the event
+  uint32_t doepint;   // epout->doepint at the event (pre-clear for RX_COMPLETE)
+  uint16_t type;      // MIDI_DIAG_EP4_RXDATA / MIDI_DIAG_EP4_RXCOMPLETE
+  uint16_t pad;
+} midi_diag_ep4_evt_t;
 
 #if MIDI_DIAG_ENABLED
 
 // Call from any context (task or ISR); never blocks, never prints.
 void midi_diag_log(uint32_t kind, uint32_t len, uint32_t ep, uint32_t aux);
+
+// Variant that also stores up to 8 payload bytes (intended for wire captures).
+void midi_diag_log_payload(uint32_t kind, uint32_t len, uint32_t ep, uint32_t aux,
+                           uint32_t p0, uint32_t p1);
 
 // Pop up to max events into out (task context only). Returns the number popped.
 uint32_t midi_diag_read(midi_diag_evt_t *out, uint32_t max);
@@ -68,11 +95,29 @@ uint32_t midi_diag_read(midi_diag_evt_t *out, uint32_t max);
 // Number of unconsumed events.
 uint32_t midi_diag_pending(void);
 
+// Record one EP4 receive event into the raw ring (ISR-safe).
+void midi_diag_ep4_record(uint16_t type, uint32_t grxstsp_raw, uint32_t doepctl,
+                          uint32_t doeptsiz, uint32_t doepint);
+
+// Pop up to max EP4 events into out (task context only), oldest first.
+// Returns the number popped. Free-running indices, so wraparound is handled
+// transparently; events older than the ring depth are silently overwritten
+// (wr - 64) and cannot be recovered.
+uint32_t midi_diag_ep4_read(midi_diag_ep4_evt_t *out, uint32_t max);
+
+// Number of unconsumed EP4 events (may exceed 64 after an undrained burst;
+// only the latest 64 are retained).
+uint32_t midi_diag_ep4_pending(void);
+
 #else
 
 #define midi_diag_log(...) ((void)0)          // arguments not evaluated
 #define midi_diag_read(...) ((uint32_t)0)
 #define midi_diag_pending() ((uint32_t)0)
+#define midi_diag_log_payload(...) ((void)0)
+#define midi_diag_ep4_record(...) ((void)0)
+#define midi_diag_ep4_read(...) ((uint32_t)0)
+#define midi_diag_ep4_pending() ((uint32_t)0)
 
 #endif
 
