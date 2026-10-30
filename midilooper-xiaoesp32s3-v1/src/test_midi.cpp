@@ -90,7 +90,7 @@ void loop() {
     static midi_diag_evt_t evts[24];
     static const char *K[] = {"?",     "DCD_ARM", "DCD_RXPKT", "DCD_DONE", "USBD_ISRQ", "USBD_DISP",
                               "DROP",  "MIDI_CB", "MIDI_RX",   "MIDI_ARM", "STRM_BLK",  "STRM_CLAIM",
-                              "STRM_SHRINK", "STRM_ARM"};
+                              "STRM_SHRINK", "STRM_ARM", "DCD_OUT_REGS", "DCD_IRQ", "DCD_OEP", "DCD_RXSTS"};
     static int64_t lastDiagT = 0;
     uint32_t n = midi_diag_read(evts, 24);
     // print only the RX path (OUT endpoints); re-arm/claim/block lines are
@@ -98,9 +98,37 @@ void loop() {
     for (uint32_t i = 0; i < n; i++) {
       const midi_diag_evt_t &e = evts[i];
       if (e.kind >= sizeof(K) / sizeof(K[0])) continue;
-      Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u aux=%lu\r\n",
+      
+      if (e.kind == DIAG_DCD_IRQ){
+        Serial1.printf("[diag] +%-8lldus %-12s gintsts_raw=%08X gintsts=%08X daint=%08X\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind], 
+                       (unsigned)e.len, (unsigned)e.ep, (unsigned)e.aux);
+      }
+
+      else if (e.kind == DIAG_DCD_OEP){
+        Serial1.printf("[diag] +%-8lldus %-12s daint=%08X doepint=%08X doepctl=%08X\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind], 
+                       (unsigned)e.len, (unsigned)e.ep, (unsigned)e.aux);
+      }
+
+      else if (e.kind == DIAG_DCD_OUT_REGS) {
+        Serial1.printf("[diag] +%-8lldus %-12s doepctl=%08X doeptsiz=%08X doepint=%08X \r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind], 
+                       (unsigned)e.len, (unsigned)e.ep, (unsigned)e.aux);
+      } 
+      
+      else if (e.kind == DIAG_DCD_RXSTS) {
+        Serial1.printf("[diag] +%-8lldus %-12s packet_status=%02X epnum=%02X byte_count=%u\r\n",
+                       (long long)(e.t - lastDiagT), K[e.kind], 
+                       (unsigned)e.len, (unsigned)e.ep, (unsigned)e.aux);
+      }
+      else 
+      {
+        Serial1.printf("[diag] +%-8lldus %-12s ep=%02X len=%-5u aux=%lu\r\n",
                      (long long)(e.t - lastDiagT), K[e.kind], e.ep,
                      (unsigned)e.len, (unsigned long)e.aux);
+      }
+      
       lastDiagT = e.t;
     }
   }

@@ -41,22 +41,26 @@ enum {
   DIAG_STREAM_CLAIM  = 11, // tu_edpt_claim() failed (e.g. RX_PENDING hold, endpoint busy): len=0 ep=ep_addr aux=fifo_remaining
   DIAG_STREAM_SHRINK = 12, // claim succeeded but FIFO cannot fit one full packet: transfer released: len=remaining ep=ep_addr
   DIAG_STREAM_ARM    = 13, // tu_edpt_stream_read_xfer() armed the endpoint: len=count ep=ep_addr
+  DIAG_DCD_OUT_REGS  = 14, // DWC2 slave OUT XFERCOMPL: event queued to the device stack: len=total_len ep=epnum aux=registers (ctl/tsiz/dma)
+  DIAG_DCD_IRQ       = 15, // DCD interrupt handler entered
+  DIAG_DCD_OEP       = 16, // DCD OUT endpoint interrupt
+  DIAG_DCD_RXSTS     = 17, // DCD RX status FIFO entry
 };
 
 // Captured diagnostic event. len/ep/aux interpretation depends on kind.
 typedef struct {
   int64_t  t;    // esp_timer_get_time() in microseconds (single common time base)
   uint32_t aux;  
-  uint16_t kind;
-  uint16_t len;
-  uint16_t ep;   // full endpoint address (dir bit included where applicable)
-  uint16_t pad;
+  uint32_t kind;
+  uint32_t len;
+  uint32_t ep;   // full endpoint address (dir bit included where applicable)
+  uint32_t pad;
 } midi_diag_evt_t;
 
 #if MIDI_DIAG_ENABLED
 
 // Call from any context (task or ISR); never blocks, never prints.
-void midi_diag_log(uint16_t kind, uint16_t len, uint16_t ep, uint32_t aux);
+void midi_diag_log(uint32_t kind, uint32_t len, uint32_t ep, uint32_t aux);
 
 // Pop up to max events into out (task context only). Returns the number popped.
 uint32_t midi_diag_read(midi_diag_evt_t *out, uint32_t max);

@@ -14,7 +14,7 @@ static midi_diag_evt_t md_ring[MD_RING];
 static volatile uint32_t md_wr = 0;
 static volatile uint32_t md_rd = 0;
 
-void midi_diag_log(uint16_t kind, uint16_t len, uint16_t ep, uint32_t aux) {
+void midi_diag_log(uint32_t kind, uint32_t len, uint32_t ep, uint32_t aux) {
   portENTER_CRITICAL_SAFE(&md_mux);
   midi_diag_evt_t *e = &md_ring[md_wr & MD_MASK];
   e->t = esp_timer_get_time();

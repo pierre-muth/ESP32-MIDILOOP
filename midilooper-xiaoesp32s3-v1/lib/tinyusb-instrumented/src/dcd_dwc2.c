@@ -430,6 +430,20 @@ static void edpt_schedule_packets(uint8_t rhport, const uint8_t epnum, const uin
   #if CFG_TUD_DWC2_SLAVE_ENABLE
     dep->diepctl = depctl.value; // enable endpoint
 
+    // Diagnostic: snapshot the OUT endpoint registers after scheduling.
+    if (dir == TUSB_DIR_OUT && epnum == 4) {
+      const uint32_t out_ctl  = dwc2->epout[epnum].doepctl;
+      const uint32_t out_size = dwc2->epout[epnum].doeptsiz;
+      const uint32_t out_int  = dwc2->epout[epnum].doepint;
+
+      midi_diag_log(
+          DIAG_DCD_OUT_REGS,
+          out_ctl,
+          out_size,
+          out_int
+      );
+    }
+
     if (dir == TUSB_DIR_IN && total_bytes != 0) {
       const uint16_t xferred_bytes = epin_write_tx_fifo(dwc2, epnum);
 
@@ -928,8 +942,18 @@ static void handle_rxflvl_irq(uint8_t rhport) {
   const dwc2_grxstsp_t grxstsp = {.value = dwc2->grxstsp};
   const uint8_t packet_status = grxstsp.packet_status;
   const uint8_t epnum = grxstsp.ep_ch_num;
+  const uint8_t byte_count = grxstsp.byte_count;
 
   dwc2_dep_t* epout = &dwc2->epout[epnum];
+
+  // Diagnostic: record every DWC2 receive-status FIFO entry.
+  // Keep this in the existing RAM-backed diagnostic logger.
+  midi_diag_log(
+      DIAG_DCD_RXSTS,
+      packet_status,
+      epnum,
+      byte_count
+  );
 
   switch (packet_status) {
     case GRXSTS_PKTSTS_GLOBAL_OUT_NAK:
@@ -1004,6 +1028,14 @@ static void handle_rxflvl_irq(uint8_t rhport) {
       } else {
         midi_diag_log(DIAG_DCD_DONE, xfer->total_len, epnum, 0);
         dcd_event_xfer_complete(rhport, epnum, xfer->total_len, XFER_RESULT_SUCCESS, true);
+        if (epnum == 4) {
+          midi_diag_log(
+              DIAG_DCD_OUT_REGS,
+              dwc2->epout[epnum].doepctl,
+              dwc2->epout[epnum].doeptsiz,
+              dwc2->epout[epnum].doepint
+          );
+        }
       }
       break;
     }
@@ -1151,14 +1183,27 @@ static void handle_ep_irq(uint8_t rhport, uint8_t dir) {
   // DAINT for a given EP clears when DEPINTx is cleared.
   // EPINT will be cleared when DAINT bits are cleared.
   for (uint8_t epnum = 0; epnum < ep_count; epnum++) {
+
+    
     if (tu_bit_test(dwc2->daint,daint_offset + epnum)) {
       dwc2_dep_t* epout = &ep_base[epnum];
+      
       union {
         uint32_t value;
         dwc2_diepint_t diepint_bm;
         dwc2_doepint_t doepint_bm;
       } intr;
       intr.value = epout->intr;
+      
+      //diag log for MIDI OUT EP4
+      if (dir == TUSB_DIR_OUT && epnum == 4) {
+        midi_diag_log(
+        DIAG_DCD_OEP,
+        dwc2->daint,
+        epout->doepint,
+        epout->doepctl
+        );
+      }
 
       epout->intr = intr.value; // Clear interrupt //-V::2584::{otg_int}
 
@@ -1242,6 +1287,18 @@ void dcd_int_handler(uint8_t rhport) {
   dwc2_regs_t* dwc2 = DWC2_REG(rhport);
   const uint32_t gintmask = dwc2->gintmsk;
   const uint32_t gintsts = dwc2->gintsts & gintmask;
+
+  // Diagnostic: snapshot interrupt state for USB OUT/RX activity.
+  const uint32_t gintsts_raw = dwc2->gintsts;
+
+  if (gintsts & (GINTSTS_RXFLVL | GINTSTS_OEPINT)) {
+    midi_diag_log(
+        DIAG_DCD_IRQ,
+        gintsts_raw,
+        gintsts,
+        dwc2->daint
+    );
+  }
 
   if (gintsts & GINTSTS_USBRST) {
     // USBRST is start of reset.
