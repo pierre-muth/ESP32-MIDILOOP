@@ -1,0 +1,57 @@
+ [midi_host_test] USB MIDI HOST test booting...                   
+[midi_host_test] CFG_TUH_MIDI=1                                                 
+                               [midi_host_test] ready (921600). Connect a USB-MI
+DI device via OTG adapter; it needs 5V VBUS.                                    
+[stat] t=5s itf0:- rx_all=drained usbh=host-running                             
+USB device attached t=6.662s daddr=1 vid=2367 pid=8102                          
+MIDI device mounted t=6.694s daddr=1 rx_cables=1 tx_cables=1                    
+[stat] t=10s itf0:MOUNTED rx_all=drained usbh=host-running                      
+RX i=0 d=0         q=4   hdr=09 [90 41 7F] (first)                              
+RX i=0 d=0         q=4   hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=1011      q=4   hdr=09 [90 43 7F] (batch)                              
+RX i=0 d=0         q=4   hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=2013      q=12  hdr=09 [90 45 7F] (batch)                              
+RX i=0 d=0         q=12  hdr=09 [90 47 7F]                                      
+RX i=0 d=0         q=12  hdr=09 [90 48 7F]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=12  hdr=00 [00 00 00]                                      
+RX i=0 d=121620    q=4   hdr=08 [80 41 00] (batch)                              
+RX i=0 d=0         q=4   hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=971       q=8   hdr=08 [80 43 00]                                      
+RX i=0 d=0         q=8   hdr=08 [80 45 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=3915      q=8   hdr=08 [80 47 00] (batch)                              
+RX i=0 d=0         q=8   hdr=08 [80 48 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=8   hdr=00 [00 00 00]                                      
+RX i=0 d=870245    q=4   hdr=09 [90 35 7F] (batch)                              
+RX i=0 d=0         q=4   hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=124822    q=4   hdr=08 [80 35 00] (batch)                              
+RX i=0 d=0         q=4   hdr=FF [FF 3F B3]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+RX i=0 d=0         q=4   hdr=00 [00 00 00]                                      
+[stat] t=15s itf0:MOUNTED rx_all=drained usbh=host-running               

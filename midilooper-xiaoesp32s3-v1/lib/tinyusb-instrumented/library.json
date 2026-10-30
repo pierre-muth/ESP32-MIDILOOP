@@ -14,7 +14,9 @@
       "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/include",
       "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/device",
       "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/class/midi",
-      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/portable/synopsys/dwc2"
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/portable/synopsys/dwc2",
+      "-IC:/Users/pfreyerm/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/arduino_tinyusb/tinyusb/src/host"
     ]
   }
 }
+
