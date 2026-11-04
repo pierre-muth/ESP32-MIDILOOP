@@ -8,7 +8,9 @@
 namespace MidiEngine {
 
   // Starts the MIDI task pinned to core 0 at high priority. Must be called
-  // once from setup(), after Model::init()/Transport::init().
+  // once from setup(), after Model::init()/Transport::init(). Also brings up
+  // the USB host stack (USBHost::begin()): the only MIDI instrument behaves
+  // as a USB device on the XIAO's OTG port (see description-v2.md).
   void start();
 
   // --- State exposed for the UI / display (read-only from other tasks) -------

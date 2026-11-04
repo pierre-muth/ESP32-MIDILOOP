@@ -1,10 +1,22 @@
 // =============================================================================
 //  midi_engine.cpp - timing-critical MIDI task: input capture, recording,
-//                     note/CC playback scheduling (core 0, high priority)
+//                    note/CC playback scheduling (core 0, high priority)
+//
+//  USB MIDI on the XIAO ESP32-S3 runs in HOST mode on its single OTG port
+//  (the external instrument, e.g. OP-1 field, acts as USB device - the only
+//  combination that delivers multi-note messages reliably, see the host
+//  diagnostics). MidiEngine owns the USBHost stack (its worker runs TUH in
+//  the background) and this task pumps the mounted MIDI interface every tick.
+//  Channel messages are dispatched straight from each 4-byte USB-MIDI event
+//  packet (the OP-1 field sends proper status bytes; packets carrying
+//  running-status data are re-materialized against the remembered status).
+//  Control Surface was removed for this mode: its USBMIDI_Interface is a
+//  device-stack (TUD) MIDI driver and cannot share the OTG port with host.
 // =============================================================================
 #include "midi_engine.h"
 #include "transport.h"
-#include <Control_Surface.h>
+#include <USBHost.h>
+#include <host-overrides.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
 #include <string.h>
@@ -17,9 +29,61 @@ volatile uint8_t lastCcInputValue[CC_CURVE_COUNT];
 volatile uint8_t localCcValue = 64;
 // volatile bool    localCcFollowing = true;
 
-static USBMIDI_Interface midi;
+// =============================================================================
+//  USB-MIDI HOST plumbing
+// =============================================================================
 
-// --- Note recording (held input notes) --------------------------------------
+// Single mounted interface index (OP-1 field exposes one MIDI streaming
+// interface). 0xFF = nothing mounted yet.
+static volatile uint8_t midIdx = 0xFF;
+// Last channel-voice status byte seen from the instrument, for packets that
+// only carry running-status data (CIN code-low variants).
+static uint8_t rxRunStatus = 0;
+
+extern "C" void tuh_midi_mount_cb(uint8_t idx, const tuh_midi_mount_cb_t *m) {
+  DBG_PRINTF("[midi] mounted daddr=%u rx=%u tx=%u\r\n", m->daddr,
+             m->rx_cable_count, m->tx_cable_count);
+  midIdx = idx;
+  rxRunStatus = 0; // fresh device, fresh stream
+}
+
+extern "C" void tuh_midi_umount_cb(uint8_t idx) {
+  DBG_PRINTF("[midi] unmounted idx=%u\r\n", idx);
+  if (midIdx == idx) midIdx = 0xFF;
+  rxRunStatus = 0; // the pending running status belonged to the removed device
+}
+
+extern "C" void tuh_midi_descriptor_cb(uint8_t, const tuh_midi_descriptor_cb_t *) {}
+extern "C" void tuh_midi_rx_cb(uint8_t, uint32_t) { /* pump happens in our task */ }
+extern "C" void tuh_midi_tx_cb(uint8_t, uint32_t) {}
+
+// =============================================================================
+//  TX - playback output to the instrument (OUT endpoint, cable 0)
+// =============================================================================
+
+static uint8_t outputChannelIdx() {
+  uint8_t ch = Model::settings.outputChannel;
+  if (ch < 1 || ch > 16) ch = 1;
+  return ch - 1;
+}
+
+// Builds a USB-MIDI event packet (CIN = status >> 4 for channel voice
+// messages) and ships it to the mounted interface right away.
+static bool txRaw(uint8_t status, uint8_t d1, uint8_t d2) {
+  uint8_t idx = midIdx;
+  if (idx == 0xFF) return false;
+  const uint8_t packet[4] = { (uint8_t)(status & 0xF0), (uint8_t)(status | outputChannelIdx()),
+                              (uint8_t)(d1 & 0x7F), (uint8_t)(d2 & 0x7F) };
+  bool ok = tuh_midi_packet_write(idx, packet);
+  if (ok) tuh_midi_write_flush(idx);
+  return ok;
+}
+
+static bool txNoteOn(uint8_t pitch, uint8_t velocity)  { return txRaw(0x90, pitch, velocity); }
+static bool txNoteOff(uint8_t pitch)                   { return txRaw(0x80, pitch, 0); }
+static bool txControlChange(uint8_t cc, uint8_t value) { return txRaw(0xB0, cc, value); }
+
+// =============================================================================
 struct HeldNote { bool active = false; uint32_t startTick = 0; uint8_t velocity = 0; };
 static HeldNote held[128];
 
@@ -36,10 +100,6 @@ static bool     outputActive[128];
 static uint32_t previousTick = 0;
 static uint64_t nextCcUs = 0;
 static bool     localCcDirty = false;
-
-static inline Channel outputChannel() {
-  return Channel::createChannel(Model::settings.outputChannel);
-}
 
 static void finalizeHeldNote(uint8_t pitch, uint32_t endOverride, bool useOverride) {
   if (!held[pitch].active) return;
@@ -99,30 +159,76 @@ static void handleCcIn(uint8_t ccNumber, uint8_t value) {
   }
 }
 
-struct EngineCallbacks : MIDI_Callbacks {
-  void onChannelMessage(MIDI_Interface &, ChannelMessage msg) override {
-    MIDIMessageType type = msg.getMessageType();
-    uint8_t channel = msg.getChannel().getOneBased();
-    bool noteOnMsg = type == MIDIMessageType::NoteOn && msg.data2 > 0;
-    bool noteOffMsg = type == MIDIMessageType::NoteOff ||
-                      (type == MIDIMessageType::NoteOn && msg.data2 == 0);
-    // Log every incoming channel message for the Settings page MIDI monitor
-    // (before any routing, so unmatched messages show up too).
-    if (noteOnMsg)       Model::logMidi(Model::MidiLogType::NOTE_ON, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
-    else if (noteOffMsg) Model::logMidi(Model::MidiLogType::NOTE_OFF, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
-    else if (type == MIDIMessageType::ControlChange)
-                         Model::logMidi(Model::MidiLogType::CC, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
-    else                 Model::logMidi(Model::MidiLogType::OTHER, channel, msg.data1 & 0x7F, msg.data2 & 0x7F);
-    if (noteOnMsg || noteOffMsg) {
-      uint8_t pitch = msg.data1 & 0x7F;
-      if (noteOnMsg) handleNoteOn(pitch, msg.data2 & 0x7F);
-      else handleNoteOff(pitch);
-      return; // deliberately no live pass-through of MIDI input
+// --- RX: USB-MIDI event packets -> channel messages ------------------------
+// The OP-1 field sends proper USB-MIDI packets (CIN + full status byte), so
+// messages are dispatched straight from each 4-byte event. Packets with
+// CIN < 0x8 (running-status code-low variants, 0x2/0x3/0x4) are re-materialized
+// against the remembered status byte. Control Surface is gone, so this parser
+// replaces EngineCallbacks::onChannelMessage.
+
+static void dispatchChannelMessage(uint8_t status, uint8_t d1, uint8_t d2) {
+  const uint8_t channel = (status & 0x0F) + 1;      // 1-based, for the MIDI monitor
+  const uint8_t type    = status & 0xF0;
+  bool noteOn          = type == 0x90 && d2 > 0;
+  bool noteOff         = type == 0x80 || (type == 0x90 && d2 == 0);
+  const uint8_t pitch  = d1 & 0x7F;
+  const uint8_t value  = d2 & 0x7F;
+
+  // Log every incoming channel message for the Settings page MIDI monitor
+  // (before any routing, so unmatched messages show up, too).
+  if (noteOn)          Model::logMidi(Model::MidiLogType::NOTE_ON, channel, pitch, value);
+  else if (noteOff)    Model::logMidi(Model::MidiLogType::NOTE_OFF, channel, pitch, value);
+  else if (type == 0xB0) Model::logMidi(Model::MidiLogType::CC, channel, pitch, value);
+  else                 Model::logMidi(Model::MidiLogType::OTHER, channel, pitch, value);
+
+  if (noteOn)       handleNoteOn(pitch, value);
+  else if (noteOff) handleNoteOff(pitch);
+  // Deliberately no live pass-through of MIDI input (see description-v2.md).
+  else if (type == 0xB0) handleCcIn(d1 & 0x7F, value);
+}
+
+static void dispatchFromPacket(const uint8_t *p) {
+  const uint8_t cin = p[0];
+  if (cin < 0x8) {
+    // CIN 0x1: single-byte events (real-time); 0x2-0x4: running-status data.
+    if (rxRunStatus == 0 || p[1] >= 0x80) return;
+    switch (cin >> 4) {
+      case 2: dispatchChannelMessage(rxRunStatus, p[1], 0); break;
+      case 3:
+      case 4: dispatchChannelMessage(rxRunStatus, p[1], p[2]); break;
     }
-    if (type == MIDIMessageType::ControlChange) handleCcIn(msg.data1 & 0x7F, msg.data2 & 0x7F);
+    return;
   }
-};
-static EngineCallbacks callbacks;
+  const uint8_t status = p[1];
+  if (status < 0x80) return;
+  if ((status & 0xF0) != 0xF0) rxRunStatus = status;
+  // Single-data-byte messages (PC / channel pressure) must not log whatever
+  // garbage the packet carries in its last slot.
+  const uint8_t d2 = (cin == 0xC0 || cin == 0xD0) ? 0 : p[3];
+  dispatchChannelMessage(status, p[2], d2);
+}
+
+static uint8_t pumpLastIdx = 0xFF;
+static void pumpMidiRx() {
+  uint8_t idx = midIdx;
+  if (idx == 0xFF) {
+    if (pumpLastIdx != 0xFF) {  // just unmounted
+      // Drop pending note-off state so a remounted instrument doesn't stay
+      // silent for stuck notes.
+      memset(outputActive, 0, sizeof(outputActive));
+      pumpLastIdx = 0xFF;
+    }
+    return;
+  }
+  if (!tuh_midi_mounted(idx)) return;
+  pumpLastIdx = idx;
+  for (;;) {
+    uint8_t batch[4 * 16];
+    const uint32_t nb = tuh_midi_packet_read_n(idx, batch, 16);
+    if (nb == 0) break;
+    for (uint32_t i = 0; i < nb; i++) dispatchFromPacket(&batch[4 * i]);
+  }
+}
 
 static bool crossed(uint32_t prev, uint32_t cur, uint32_t target) {
   return target > prev && target <= cur;
@@ -139,10 +245,9 @@ static uint32_t effectiveEnd(const Note &n, uint32_t length) {
 }
 
 static void flushAllNoteOffs() {
-  Channel ch = outputChannel();
   for (uint16_t pitch = 0; pitch < 128; pitch++) {
     if (outputActive[pitch]) {
-      midi.sendNoteOff(MIDIAddress((uint8_t)pitch, ch), 0);
+      txNoteOff((uint8_t)pitch);
       outputActive[pitch] = false;
     }
   }
@@ -150,7 +255,6 @@ static void flushAllNoteOffs() {
 
 static void scheduleNotes(uint32_t tick, bool wrapped) {
   uint32_t length = Model::loopLengthTicks();
-  Channel ch = outputChannel();
 
   if (wrapped) {
     flushAllNoteOffs();
@@ -159,7 +263,7 @@ static void scheduleNotes(uint32_t tick, bool wrapped) {
         const Note &n = Model::notes[i];
         if (n.startTick >= length) continue;
         if (effectiveStart(n, length) == 0) {
-          midi.sendNoteOn(MIDIAddress(n.pitch, ch), n.velocity);
+          txNoteOn(n.pitch, n.velocity);
           outputActive[n.pitch] = true;
         }
       }
@@ -175,11 +279,11 @@ static void scheduleNotes(uint32_t tick, bool wrapped) {
     uint32_t e = effectiveEnd(n, length);
     if (e <= s) e = (s < length) ? s + 1 : length;
     if (!outputActive[n.pitch] && s > 0 && crossed(previousTick, tick, s)) {
-      midi.sendNoteOn(MIDIAddress(n.pitch, ch), n.velocity);
+      txNoteOn(n.pitch, n.velocity);
       outputActive[n.pitch] = true;
     }
     if (outputActive[n.pitch] && e < length && crossed(previousTick, tick, e)) {
-      midi.sendNoteOff(MIDIAddress(n.pitch, ch), 0);
+      txNoteOff(n.pitch);
       outputActive[n.pitch] = false;
     }
   }
@@ -187,7 +291,6 @@ static void scheduleNotes(uint32_t tick, bool wrapped) {
 }
 
 static void scheduleCc(uint32_t tick, uint64_t nowUs) {
-  Channel ch = outputChannel();
   uint8_t curveIdx = Model::selectedCurve;
 
   // Local "follow the curve" indicator if curve has points
@@ -200,7 +303,7 @@ static void scheduleCc(uint32_t tick, uint64_t nowUs) {
   if (localCcDirty) {
     localCcDirty = false;
     const CcCurve &curve = Model::ccCurves[curveIdx];
-    if (!curve.muted) midi.sendControlChange(MIDIAddress(curve.ccNumber, ch), localCcValue);
+    if (!curve.muted) txControlChange(curve.ccNumber, localCcValue);
   }
 
   uint32_t rate = Model::settings.ccRateHz == 0 ? 1 : Model::settings.ccRateHz;
@@ -212,8 +315,7 @@ static void scheduleCc(uint32_t tick, uint64_t nowUs) {
   for (uint8_t i = 0; i < CC_CURVE_COUNT; i++) {
     const CcCurve &curve = Model::ccCurves[i];
     if (curve.muted || curve.pointCount == 0) continue;
-    uint8_t value = Model::curveValueAt(i, tick);
-    midi.sendControlChange(MIDIAddress(curve.ccNumber, ch), value);
+    txControlChange(curve.ccNumber, Model::curveValueAt(i, tick));
   }
   xSemaphoreGive(Model::mutex);
 }
@@ -221,20 +323,17 @@ static void scheduleCc(uint32_t tick, uint64_t nowUs) {
 static void servicePreview() {
   if (previewPending) {
     previewPending = false;
-    Channel ch = outputChannel();
-    if (previewActivePitch != 255) midi.sendNoteOff(MIDIAddress(previewActivePitch, ch), 0);
+    if (previewActivePitch != 255) txNoteOff(previewActivePitch);
     previewActivePitch = previewPitch;
-    midi.sendNoteOn(MIDIAddress(previewActivePitch, ch), previewVelocity);
+    txNoteOn(previewActivePitch, previewVelocity);
     previewOffAtUs = (uint64_t)esp_timer_get_time() + PREVIEW_DURATION_US;
   } else if (previewActivePitch != 255 && (uint64_t)esp_timer_get_time() >= previewOffAtUs) {
-    midi.sendNoteOff(MIDIAddress(previewActivePitch, outputChannel()), 0);
+    txNoteOff(previewActivePitch);
     previewActivePitch = 255;
   }
 }
 
 static void taskMidi(void *) {
-  midi.setCallbacks(callbacks);
-  midi.begin();
   memset(held, 0, sizeof(held));
   memset(outputActive, 0, sizeof(outputActive));
   memset((void *)activeInputNote, 0, sizeof(activeInputNote));
@@ -248,8 +347,9 @@ static void taskMidi(void *) {
     // races (USB input deferred until the next message arrives). 
 
     taskYIELD(); // yield to other tasks (e.g. display) to avoid starving them
-    vTaskDelay( pdMS_TO_TICKS(1) ); 
-    midi.update();
+    vTaskDelay( pdMS_TO_TICKS(1) );
+
+    pumpMidiRx();
 
     TransportState transport = Transport::state;
     RecordState noteRecord = Transport::noteRecord;
@@ -311,6 +411,17 @@ static void taskMidi(void *) {
 
 void start() {
   memset((void *)lastCcInputValue, 0, sizeof(lastCcInputValue));
+  memset((void *)&rxRunStatus, 0, sizeof(rxRunStatus));
+
+  DBG_PRINTLN("[midi] starting USB host...");
+  USBHost.setCore(0); // keep TUH worker on the same core as this task
+  if (!USBHost.begin()) {
+    DBG_PRINTLN("[midi] USB host init FAILED - MIDI disabled this boot");
+    xTaskCreatePinnedToCore(taskMidi, "midi", 8192, nullptr, 10, nullptr, 0);
+    return; // pump/tx helpers see midIdx==0xFF and stay silent
+  }
+  DBG_PRINTLN("[midi] USB host running - connect the instrument (OTG)");
+
   xTaskCreatePinnedToCore(taskMidi, "midi", 32768, nullptr, 10, nullptr, 0);
 }
 
