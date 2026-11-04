@@ -300,7 +300,7 @@ static void drawButtons() {
 // Newest messages at the bottom; once the pane is full, older lines scroll up
 // and out of the top. Line height for text size 1.
 static const int16_t MON_X       = LEFT_COLUMN_W + 4;
-static const int16_t MON_TITLE_H = 12;    // header height
+static const int16_t MON_TITLE_H = 23;    // header height: title + device line
 static const int16_t MON_LINE_H  = 10;
 
 static void formatMidiEntry(const Model::MidiLogEntry &e, char *b, size_t n) {
@@ -326,11 +326,33 @@ static void formatMidiEntry(const Model::MidiLogEntry &e, char *b, size_t n) {
   snprintf(b, n, "%7lu.%03lu %s", (unsigned long)(e.ms / 1000), (unsigned long)(e.ms % 1000), body);
 }
 
+// Right-aligned text on the same baseline as `left`.
+static void drawRightAligned(const char *text, int16_t xRight, int16_t y) {
+  display.setCursor(xRight - strlen(text) * 6, y);
+  display.print(text);
+}
+
+// USB host connection status above the monitor log: who is on the OTG port.
+static void drawDeviceStatus(int16_t y) {
+  const MidiEngine::DeviceInfo d = MidiEngine::deviceInfo();
+  char status[48];
+  if (!d.present) {
+    snprintf(status, sizeof(status), "no device");
+  } else {
+    const uint32_t upS = (millis() - d.mountMs) / 1000;
+    snprintf(status, sizeof(status), "%04X:%04X IN%u OUT%u %lus",
+             d.vid, d.pid, d.cablesIn, d.cablesOut, (unsigned long)upS);
+  }
+  drawRightAligned(status, DISPLAY_W - 4, y);
+}
+
 static void drawMidiMonitor() {
   display.setTextColor(COLOR_BLACK);
   display.setTextSize(1);
   display.setCursor(MON_X, 1);
   display.print("MIDI IN");
+  drawRightAligned("USB HOST", DISPLAY_W - 4, 1);
+  drawDeviceStatus(MON_TITLE_H - 10 - 1);  // second header line
   display.drawFastHLine(LEFT_COLUMN_W, MON_TITLE_H - 3, DISPLAY_W - LEFT_COLUMN_W, COLOR_BLACK);
 
   static Model::MidiLogEntry entries[MIDI_LOG_SIZE];

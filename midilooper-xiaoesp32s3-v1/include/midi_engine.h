@@ -15,6 +15,17 @@ namespace MidiEngine {
 
   // --- State exposed for the UI / display (read-only from other tasks) -------
 
+  // Snapshot of the USB host connection, for the Settings page status line.
+  // Set from the TinyUSB worker callbacks, safe to call from any task.
+  struct DeviceInfo {
+    bool     present;    // a MIDI device is currently mounted
+    uint16_t vid, pid;   // USB identity of the connected instrument
+    uint8_t  cablesIn;   // virtual cables on the device's IN endpoint
+    uint8_t  cablesOut;  // virtual cables on the device's OUT endpoint
+    uint32_t mountMs;    // millis() timestamp of the mount (uptime display)
+  };
+  DeviceInfo deviceInfo();
+
   // True while a MIDI Note On for this pitch has been received and no
   // matching Note Off has arrived yet (drives the right-column indicator).
   extern volatile bool activeInputNote[128];

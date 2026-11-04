@@ -40,9 +40,29 @@ static volatile uint8_t midIdx = 0xFF;
 // only carry running-status data (CIN code-low variants).
 static uint8_t rxRunStatus = 0;
 
+// --- Connected-device status (Settings page) -------------------------------
+// Written by TUH callbacks (worker task), read as a snapshot by the display.
+static portMUX_TYPE                    devMux = portMUX_INITIALIZER_UNLOCKED;
+static MidiEngine::DeviceInfo          devInfo = {};
+
+extern "C" void tuh_enum_descriptor_device_cb(uint8_t daddr, const tusb_desc_device_t *desc) {
+  // Captured on every attach. (tuh_mount_cb is claimed by the core's USBHost
+  // wrapper, this descriptor hook is the free one for device identity.)
+  portENTER_CRITICAL(&devMux);
+  devInfo.vid = desc->idVendor;
+  devInfo.pid = desc->idProduct;
+  portEXIT_CRITICAL(&devMux);
+}
+
 extern "C" void tuh_midi_mount_cb(uint8_t idx, const tuh_midi_mount_cb_t *m) {
   DBG_PRINTF("[midi] mounted daddr=%u rx=%u tx=%u\r\n", m->daddr,
              m->rx_cable_count, m->tx_cable_count);
+  portENTER_CRITICAL(&devMux);
+  devInfo.present   = true;
+  devInfo.cablesIn  = m->rx_cable_count;
+  devInfo.cablesOut = m->tx_cable_count;
+  devInfo.mountMs   = millis();
+  portEXIT_CRITICAL(&devMux);
   midIdx = idx;
   rxRunStatus = 0; // fresh device, fresh stream
 }
@@ -51,14 +71,23 @@ extern "C" void tuh_midi_umount_cb(uint8_t idx) {
   DBG_PRINTF("[midi] unmounted idx=%u\r\n", idx);
   if (midIdx == idx) midIdx = 0xFF;
   rxRunStatus = 0; // the pending running status belonged to the removed device
+  portENTER_CRITICAL(&devMux);
+  devInfo.present = false;
+  portEXIT_CRITICAL(&devMux);
 }
 
 extern "C" void tuh_midi_descriptor_cb(uint8_t, const tuh_midi_descriptor_cb_t *) {}
 extern "C" void tuh_midi_rx_cb(uint8_t, uint32_t) { /* pump happens in our task */ }
 extern "C" void tuh_midi_tx_cb(uint8_t, uint32_t) {}
 
-// =============================================================================
-//  TX - playback output to the instrument (OUT endpoint, cable 0)
+// --- Bridge to the display/UI ---------------------------------------------
+MidiEngine::DeviceInfo deviceInfo() {
+  portENTER_CRITICAL(&devMux);
+  MidiEngine::DeviceInfo snapshot = devInfo;
+  portEXIT_CRITICAL(&devMux);
+  return snapshot;
+}
+
 // =============================================================================
 
 static uint8_t outputChannelIdx() {
