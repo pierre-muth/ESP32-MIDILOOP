@@ -251,11 +251,15 @@ static void pumpMidiRx() {
   }
   if (!tuh_midi_mounted(idx)) return;
   pumpLastIdx = idx;
+  // NOTE: packet_read_n's bufsize and return value are BYTES (rounded down to
+  // a multiple of 4), not packets - iterate nb/4 event packets only, never the
+  // whole buffer (stale bytes would replay old events with fresh timestamps).
   for (;;) {
     uint8_t batch[4 * 16];
-    const uint32_t nb = tuh_midi_packet_read_n(idx, batch, 16);
+    const uint32_t nb = tuh_midi_packet_read_n(idx, batch, sizeof(batch));
     if (nb == 0) break;
-    for (uint32_t i = 0; i < nb; i++) dispatchFromPacket(&batch[4 * i]);
+    const uint32_t count = nb / 4;
+    for (uint32_t i = 0; i < count; i++) dispatchFromPacket(&batch[4 * i]);
   }
 }
 
