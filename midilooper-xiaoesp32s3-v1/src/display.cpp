@@ -421,15 +421,17 @@ static void taskDisplay(void *) {
   display.clearDisplayBuffer();
   display.refresh();
 
-  float fps;
-  int spiSpeed;
   startRenderLoopUs = (int64_t)esp_timer_get_time();
 
   for (;;) {
-    fps = (float)(1000000.0f / (float)(esp_timer_get_time() - startRenderLoopUs));
-    startRenderLoopUs = (int64_t)esp_timer_get_time();
+    const int64_t frameStartUs = esp_timer_get_time();
     renderFrame();
-    // DBG_PRINTLN("[taskDisplay] FPS: "+String(fps)+", Render time: "+String((int64_t)esp_timer_get_time() - startRenderLoopUs)+" us");
+    const uint32_t renderUs = (uint32_t)(esp_timer_get_time() - frameStartUs);
+    const uint32_t frameUs  = (uint32_t)(esp_timer_get_time() - startRenderLoopUs);
+    startRenderLoopUs = esp_timer_get_time();
+    // FPS*100 for the MIDI engine heartbeat (integer, no float in hot path)
+    const uint16_t fps100 = frameUs > 0 ? (uint16_t)(100000000u / frameUs) : 0;
+    MidiEngine::setDisplayStats(fps100, renderUs);
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 }

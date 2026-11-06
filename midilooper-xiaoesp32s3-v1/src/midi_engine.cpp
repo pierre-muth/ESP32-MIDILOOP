@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 //  midi_engine.cpp - timing-critical MIDI task: input capture, recording,
 //                    note/CC playback scheduling (core 0, high priority)
 //
@@ -16,9 +16,12 @@
 #include "midi_engine.h"
 #include "transport.h"
 #include <USBHost.h>
+#include <host/usbh_pvt.h>
 #include <host-overrides.h>
 #include <freertos/task.h>
+#include <freertos/ringbuf.h>
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 #include <string.h>
 #include <algorithm>
 
@@ -40,10 +43,24 @@ static volatile uint8_t midIdx = 0xFF;
 // only carry running-status data (CIN code-low variants).
 static uint8_t rxRunStatus = 0;
 
+// --- diagnostics counters (10 s heartbeat on the debug port) ----------------
+// txSent: packets accepted into the TinyUSB TX FIFO (app-level)
+// txFlush: packets handed to the DWC2 controller (bus submission)
+// txBusy : flush calls finding the endpoint busy (cb-driven re-arm takes over)
+// txCb    : device-confirmed OUT transfer completions (ground truth)
+// txFail : enqueue failures or packets dropped without sending
+// rxPkt/rxEvt/rxUnk: received packets / routed channel messages / rejects
+static volatile uint32_t txStatSent = 0, txStatFail = 0;
+static volatile int32_t  txStatQueued = 0;
+static volatile uint32_t txStatFlush = 0, txStatBusy = 0, txStatCb = 0;
+static volatile uint32_t rxStatPackets = 0, rxStatEvents = 0, rxStatUnknown = 0;
+
 // --- Connected-device status (Settings page) -------------------------------
 // Written by TUH callbacks (worker task), read as a snapshot by the display.
 static portMUX_TYPE                    devMux = portMUX_INITIALIZER_UNLOCKED;
 static MidiEngine::DeviceInfo          devInfo = {};
+// display performance snapshot, same pattern
+static portMUX_TYPE                    statsMux = portMUX_INITIALIZER_UNLOCKED;
 
 extern "C" void tuh_enum_descriptor_device_cb(uint8_t daddr, const tusb_desc_device_t *desc) {
   // Captured on every attach. (tuh_mount_cb is claimed by the core's USBHost
@@ -78,9 +95,12 @@ extern "C" void tuh_midi_umount_cb(uint8_t idx) {
 
 extern "C" void tuh_midi_descriptor_cb(uint8_t, const tuh_midi_descriptor_cb_t *) {}
 extern "C" void tuh_midi_rx_cb(uint8_t, uint32_t) { /* pump happens in our task */ }
-extern "C" void tuh_midi_tx_cb(uint8_t, uint32_t) {}
+extern "C" void tuh_midi_tx_cb(uint8_t idx, uint32_t xferred_bytes) {
+  txStatCb = txStatCb + xferred_bytes / 4; // completed OUT packets
+}
 
 // --- Bridge to the display/UI ---------------------------------------------
+static MidiEngine::DisplayStats gDisplayStats = {};
 MidiEngine::DeviceInfo deviceInfo() {
   portENTER_CRITICAL(&devMux);
   MidiEngine::DeviceInfo snapshot = devInfo;
@@ -88,24 +108,93 @@ MidiEngine::DeviceInfo deviceInfo() {
   return snapshot;
 }
 
+MidiEngine::DisplayStats displayStats() {
+  portENTER_CRITICAL(&statsMux);
+  MidiEngine::DisplayStats snapshot = gDisplayStats;
+  portEXIT_CRITICAL(&statsMux);
+  return snapshot;
+}
+
+// =============================================================================
+//  TX - playback output to the instrument (OUT endpoint, cable 0)
+//
+//  TinyUSB host endpoints must only be touched from the TUH task context
+//  (usbh_edpt_claim/xfer race with midih_xfer_cb re-arming otherwise, stalling
+//  transfers permanently). The MIDI task therefore only *enqueues* events
+//  into a byte ring; a function deferred with usbh_defer_func() drains the
+//  ring and does packet_write/write_flush inside the usbhTuh worker.
 // =============================================================================
 
+// ring holds raw MIDI messages as 3 bytes: status | d1 | d2
+static RingbufHandle_t txRing = nullptr;
+static const size_t    TX_MSG_LEN = 3;
+// one deferred pump at a time; the running pump re-queues itself if the ring
+// grew while it was draining
+static volatile bool   txPumpQueued = false;
+
+// Channel index (0-based) for the wired output channel setting.
 static uint8_t outputChannelIdx() {
   uint8_t ch = Model::settings.outputChannel;
   if (ch < 1 || ch > 16) ch = 1;
   return ch - 1;
 }
 
-// Builds a USB-MIDI event packet (CIN = status >> 4 for channel voice
-// messages) and ships it to the mounted interface right away.
+static void requestTxPump();
+
+// --- runs in TUH worker context -------------------------------------------
+static void txPumpTask(void *) {
+  txPumpQueued = false;
+  size_t len = 0;
+  for (;;) {
+    uint8_t *msg = (uint8_t *)xRingbufferReceive(txRing, &len, 0);
+    if (msg == nullptr) break;
+    uint8_t idx = midIdx; // re-read per item: the device may leave mid-drain
+    if (len == TX_MSG_LEN && idx != 0xFF && tuh_midi_mounted(idx)) {
+      // USB-MIDI event packet, cable 0:
+      //   byte0 = (cable << 4) | CIN, CIN = status>>4 for channel voice events
+      //   byte1 = channel status (channel in low nibble)
+      const uint8_t packet[4] = { (uint8_t)(msg[0] >> 4),          // cable 0 << 4 | CIN
+                                  (uint8_t)(msg[0] | outputChannelIdx()),
+                                  (uint8_t)(msg[1] & 0x7F),
+                                  (uint8_t)(msg[2] & 0x7F) };
+      txStatQueued = txStatQueued - 1;
+      if (tuh_midi_packet_write(idx, packet)) {
+        txStatSent = txStatSent + 1;
+        // flush while the OUT endpoint is idle; midih_xfer_cb re-arms later
+        const uint32_t flushed = tuh_midi_write_flush(idx);
+        if (flushed > 0) {
+          txStatFlush = txStatFlush + flushed / 4;
+        } else {
+          txStatBusy = txStatBusy + 1; // endpoint busy, cb-driven re-arm carries on
+        }
+      } else {
+        txStatFail = txStatFail + 1;
+      }
+    } else {
+      // unmounted in the meantime, or malformed item (should not happen:
+      // producers push exactly 3-byte messages) - drop it
+      txStatQueued = txStatQueued - 1;
+      txStatFail = txStatFail + 1;
+    }
+    vRingbufferReturnItem(txRing, msg);
+  }
+  if (txStatQueued > 0) requestTxPump();
+}
+
+static void requestTxPump() {
+  if (txPumpQueued) return;
+  txPumpQueued = true;
+  usbh_defer_func(txPumpTask, nullptr, false);
+}
+
+// --- runs in the MIDI task: only enqueue, never touch TUH ------------------
 static bool txRaw(uint8_t status, uint8_t d1, uint8_t d2) {
-  uint8_t idx = midIdx;
-  if (idx == 0xFF) return false;
-  const uint8_t packet[4] = { (uint8_t)(status & 0xF0), (uint8_t)(status | outputChannelIdx()),
-                              (uint8_t)(d1 & 0x7F), (uint8_t)(d2 & 0x7F) };
-  bool ok = tuh_midi_packet_write(idx, packet);
-  if (ok) tuh_midi_write_flush(idx);
-  return ok;
+  if (txRing == nullptr) return false;
+  const uint8_t msg[TX_MSG_LEN] = { status, (uint8_t)(d1 & 0x7F), (uint8_t)(d2 & 0x7F) };
+  if (xRingbufferSend(txRing, msg, TX_MSG_LEN, 0) != pdTRUE) { txStatFail = txStatFail + 1; return false; }
+  txStatQueued = txStatQueued + 1;
+  requestTxPump();
+  return true;
 }
 
 static bool txNoteOn(uint8_t pitch, uint8_t velocity)  { return txRaw(0x90, pitch, velocity); }
@@ -202,6 +291,7 @@ static void dispatchChannelMessage(uint8_t status, uint8_t d1, uint8_t d2) {
   bool noteOff         = type == 0x80 || (type == 0x90 && d2 == 0);
   const uint8_t pitch  = d1 & 0x7F;
   const uint8_t value  = d2 & 0x7F;
+  rxStatEvents = rxStatEvents + 1;
 
   // Log every incoming channel message for the Settings page MIDI monitor
   // (before any routing, so unmatched messages show up, too).
@@ -217,23 +307,29 @@ static void dispatchChannelMessage(uint8_t status, uint8_t d1, uint8_t d2) {
 }
 
 static void dispatchFromPacket(const uint8_t *p) {
-  const uint8_t cin = p[0];
+  // USB-MIDI event packet header: p[0] = (cable << 4) | CIN
+  // (cable number is the HIGH nibble, code index number the LOW nibble).
+  const uint8_t cable = p[0] >> 4;
+  const uint8_t cin   = p[0] & 0x0F;
+  if (cable != 0) { rxStatUnknown = rxStatUnknown + 1; return; } // only cable 0 comes from the OP-1
   if (cin < 0x8) {
-    // CIN 0x1: single-byte events (real-time); 0x2-0x4: running-status data.
-    if (rxRunStatus == 0 || p[1] >= 0x80) return;
-    switch (cin >> 4) {
-      case 2: dispatchChannelMessage(rxRunStatus, p[1], 0); break;
-      case 3:
-      case 4: dispatchChannelMessage(rxRunStatus, p[1], p[2]); break;
+    // Code low packets: 0x1 = single byte (real-time etc.), 0x2-0x4 carry
+    // running-status data instead of a full status byte.
+    if (rxRunStatus == 0 || p[1] >= 0x80) { rxStatUnknown = rxStatUnknown + 1; return; }
+    switch (cin) {
+      case 0x2: dispatchChannelMessage(rxRunStatus, p[1], 0); break;
+      case 0x3:
+      case 0x4: dispatchChannelMessage(rxRunStatus, p[1], p[2]); break;
+      default: break; // CIN 0 (misc) can't be routed into the app model
     }
     return;
   }
   const uint8_t status = p[1];
-  if (status < 0x80) return;
+  if (status < 0x80) { rxStatUnknown = rxStatUnknown + 1; return; } // invalid MIDI stream byte
   if ((status & 0xF0) != 0xF0) rxRunStatus = status;
   // Single-data-byte messages (PC / channel pressure) must not log whatever
-  // garbage the packet carries in its last slot.
-  const uint8_t d2 = (cin == 0xC0 || cin == 0xD0) ? 0 : p[3];
+  // the device left in the packet's last slot.
+  const uint8_t d2 = (cin == 0xC || cin == 0xD) ? 0 : p[3];
   dispatchChannelMessage(status, p[2], d2);
 }
 
@@ -258,11 +354,48 @@ static void pumpMidiRx() {
     uint8_t batch[4 * 16];
     const uint32_t nb = tuh_midi_packet_read_n(idx, batch, sizeof(batch));
     if (nb == 0) break;
+    rxStatPackets = rxStatPackets + nb / 4;
     const uint32_t count = nb / 4;
     for (uint32_t i = 0; i < count; i++) dispatchFromPacket(&batch[4 * i]);
   }
 }
 
+// Compact 10 s heartbeat: MIDI health + model memory usage. Kept on the
+// debug port permanently - it is the fastest way to see host-stack state
+// (mount, tx flow, drops) without attaching a full debugger.
+static void heartbeat() {
+  static uint32_t last = 0;
+  const uint32_t now = millis();
+  if (now - last < 10000) return;
+  last = now;
+  uint16_t notes = 0, ccPoints = 0;
+  if (xSemaphoreTake(Model::mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+    notes    = Model::noteCount;
+    for (uint8_t i = 0; i < CC_CURVE_COUNT; i++)
+      ccPoints = ccPoints + Model::ccCurves[i].pointCount;
+    xSemaphoreGive(Model::mutex);
+  }
+  DBG_PRINTF("[stat] t=%lus rx=%lu/%lu/%lu tx=%lu/%lu/%lu f=%lu b=%lu cb=%lu "
+             "notes=%u/%u ccPts=%u/%u free=%u\r\n",
+             (unsigned long)(now / 1000),
+             (unsigned long)rxStatEvents, (unsigned long)rxStatUnknown,
+             (unsigned long)rxStatPackets,
+             (unsigned long)txStatCb, (long)txStatQueued, (unsigned long)txStatFail,
+             (unsigned long)txStatFlush, (unsigned long)txStatBusy,
+             (unsigned long)txStatSent,
+             notes, MAX_NOTES, ccPoints, CC_CURVE_COUNT * MAX_CC_POINTS,
+             (unsigned int)esp_get_minimum_free_heap_size());
+}
+
+// --- performance snapshot for the display (repaint stats) ------------------
+
+// Display updates its repaint statistics; read by the settings heartbeat.
+void setDisplayStats(Fps100_t fps100, uint32_t renderUs) {
+  portENTER_CRITICAL(&statsMux);
+  gDisplayStats.fps100    = fps100;
+  gDisplayStats.renderUs  = renderUs;
+  portEXIT_CRITICAL(&statsMux);
+}
 static bool crossed(uint32_t prev, uint32_t cur, uint32_t target) {
   return target > prev && target <= cur;
 }
@@ -383,6 +516,7 @@ static void taskMidi(void *) {
     vTaskDelay( pdMS_TO_TICKS(1) );
 
     pumpMidiRx();
+    heartbeat();
 
     TransportState transport = Transport::state;
     RecordState noteRecord = Transport::noteRecord;
@@ -442,19 +576,47 @@ static void taskMidi(void *) {
   }
 }
 
+// --- bring-up helper --------------------------------------------------------
+// The DWC2 host ISR is allocated by tusb_init() on the core that *calls*
+// USBHost::begin() (USBHost::setCore only pins the worker task). Slave-mode
+// host re-arms the mounted device's IN endpoint every USB frame, so that ISR
+// fires constantly while a device is attached. It must therefore live on
+// core 0 with the MIDI task: core 1 owns the display refresh, whose SPI
+// transfer becomes visibly choppy when chopped up by the host ISR.
+static SemaphoreHandle_t hostBootSem  = nullptr;
+static bool              hostBootOk   = false;
+
+static void hostBootTask(void *) {
+  hostBootOk = USBHost.begin();
+  xSemaphoreGive(hostBootSem);
+  vTaskDelete(nullptr);
+}
+
 void start() {
   memset((void *)lastCcInputValue, 0, sizeof(lastCcInputValue));
   memset((void *)&rxRunStatus, 0, sizeof(rxRunStatus));
 
   DBG_PRINTLN("[midi] starting USB host...");
-  USBHost.setCore(0); // keep TUH worker on the same core as this task
-  if (!USBHost.begin()) {
+  txRing = xRingbufferCreate(512, RINGBUF_TYPE_NOSPLIT);
+
+  hostBootSem = xSemaphoreCreateBinary();
+  if (hostBootSem != nullptr) {
+    if (xTaskCreatePinnedToCore(hostBootTask, "usbbt", 4096, nullptr,
+                                configMAX_PRIORITIES - 1, nullptr, 0 /* core 0 */) == pdPASS) {
+      xSemaphoreTake(hostBootSem, pdMS_TO_TICKS(5000));
+      vSemaphoreDelete(hostBootSem);
+    }
+  }
+  hostBootSem = nullptr;
+
+  if (!hostBootOk) {
     DBG_PRINTLN("[midi] USB host init FAILED - MIDI disabled this boot");
     xTaskCreatePinnedToCore(taskMidi, "midi", 8192, nullptr, 10, nullptr, 0);
     return; // pump/tx helpers see midIdx==0xFF and stay silent
   }
   DBG_PRINTLN("[midi] USB host running - connect the instrument (OTG)");
 
+  // Byte pump feeding the deferred TX (runs in TUH worker context).
   xTaskCreatePinnedToCore(taskMidi, "midi", 32768, nullptr, 10, nullptr, 0);
 }
 
@@ -494,3 +656,4 @@ void requestNotePreview(uint8_t pitch, uint8_t velocity) {
 }
 
 } // namespace MidiEngine
+

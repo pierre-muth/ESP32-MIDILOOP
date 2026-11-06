@@ -26,6 +26,15 @@ namespace MidiEngine {
   };
   DeviceInfo deviceInfo();
 
+  // Display repaint performance, for the heartbeat (see display.cpp).
+  typedef uint16_t Fps100_t; // fps * 100, avoids float in the ISR-free path
+  struct DisplayStats {
+    Fps100_t fps100;     // rendered frames per second * 100
+    uint32_t renderUs;   // last frame render time in microseconds
+  };
+  void setDisplayStats(Fps100_t fps100, uint32_t renderUs);
+  DisplayStats displayStats();
+
   // True while a MIDI Note On for this pitch has been received and no
   // matching Note Off has arrived yet (drives the right-column indicator).
   extern volatile bool activeInputNote[128];
