@@ -1,4 +1,3 @@
 # ESP32-MIDILOOP
-A Simple USB midi looper. 
-
-Detailed description in the description MD file. 
+A Simple USB midi looper made by Claude/Codex.
+Prompt in the description MD files. 
